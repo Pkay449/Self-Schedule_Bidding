@@ -709,5 +709,6 @@ for m=1:M
 end
 
 EV=mean(V);
+disp(EV)
 
 end

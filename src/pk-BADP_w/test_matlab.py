@@ -45,3 +45,10 @@ print("Weights saved successfully!")
 eng.quit()
 #%%
 
+
+# Start MATLAB engine
+eng = matlab.engine.start_matlab()
+
+eng.badp_w()
+
+# %%
