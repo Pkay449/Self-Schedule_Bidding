@@ -84,3 +84,15 @@ def badp_weights(T=5):
 
 # Example usage (if data and functions are ready):
 # weights = badp_weights(T=5)
+
+if __name__ == "__main__":
+    import sys
+    import os
+    
+    # set current path as working directory
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    
+    weights = badp_weights(T=5)
+    # save array to '../../notebooks/udays_badpWeights.npy'
+    np.save('../../notebooks/udays_badpWeights.npy', weights)
+    print("Weights saved successfully!")

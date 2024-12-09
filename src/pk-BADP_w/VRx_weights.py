@@ -48,8 +48,7 @@ def VRx_weights(phi, Y, weights_lsqlin):
     H = phi @ np.diag(weights_lsqlin) @ phi.T
     c = -phi @ np.diag(weights_lsqlin) @ Y
     
-    epsilon = 1e-8
-    H += epsilon * np.eye(H.shape[0])
+    H = (H + H.T) / 2  # Ensure H is symmetric
 
 
     # min_w 0.5 * w^T H w + c^T w
