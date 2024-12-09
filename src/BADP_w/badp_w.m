@@ -1,7 +1,7 @@
 function [ EV ] = badp_w(N,M,T,Season,length_R,seed)
-% Berechnet optimale Mengenentscheidung für Pumpspeicherkraftwerk
-% Um 12 Uhr werden 24 Mengengebote für Day Ahead Markt abgegeben
-% Um 15 Uhr werden 96 Mengengebote für Intraday Markt abgebenen
+% Berechnet optimale Mengenentscheidung fï¿½r Pumpspeicherkraftwerk
+% Um 12 Uhr werden 24 Mengengebote fï¿½r Day Ahead Markt abgegeben
+% Um 15 Uhr werden 96 Mengengebote fï¿½r Intraday Markt abgebenen
 % Entschieden wird die ein/ausgehende energie
 
 %profile on
@@ -22,14 +22,14 @@ intlinprog_options=optimoptions('intlinprog','displa','off');
 weights_D_value=badp_weights(T);
 
 
-%lineare Rampe für an/abschalten von Pumpe/Turbine
+%lineare Rampe fï¿½r an/abschalten von Pumpe/Turbine
 t_ramp_pump_up=2/60;
 t_ramp_pump_down=2/60;
 t_ramp_turbine_up=2/60;
 t_ramp_turbine_down=2/60;
 
 
-c_grid_fee=5/4; %entspricht 5€/MWh
+c_grid_fee=5/4; %entspricht 5ï¿½/MWh
 Delta_ti=0.25; %Intraday Block sind 15min
 Delta_td=1;
 
@@ -62,8 +62,11 @@ c_turbine_up=t_ramp_turbine_up/2;
 c_turbine_down=t_ramp_turbine_down/2;
 
 % Load Data
-load(strcat('Data\P_day_',Season,'.mat'));
-load(strcat('Data\P_intraday_',Season,'.mat'));
+% load(strcat('Data\P_day_',Season,'.mat'));
+% load(strcat('Data\P_intraday_',Season,'.mat'));
+
+load(fullfile('Data', strcat('P_day_', Season, '.mat')));
+load(fullfile('Data', strcat('P_intraday_', Season, '.mat')));
 
 
 %Sample Path
@@ -137,8 +140,8 @@ for t=T:-1:1 %Backwards step
             end
             
             
-            k=convhull([R_vec',VRx(:,2)]); %Konvexe Hülle für x=0
-            k(1)=[]; %erstes element nicht nötig;
+            k=convhull([R_vec',VRx(:,2)]); %Konvexe Hï¿½lle fï¿½r x=0
+            k(1)=[]; %erstes element nicht nï¿½tig;
             
             lk=length(k);
             %a Achsenabschnitt, b Steigung R, c Steigung x
@@ -161,9 +164,9 @@ for t=T:-1:1 %Backwards step
             
         end
         
-        for iR=1:length_R %über alle Speicherstände
+        for iR=1:length_R %ï¿½ber alle Speicherstï¿½nde
             R=R_vec(iR);
-            for ix=1:length(x_vec) %über sign(x0)
+            for ix=1:length(x_vec) %ï¿½ber sign(x0)
                 x0=x_vec(ix);
                 f=zeros(1,96*12+24+1);
                 %Wertfunktion
@@ -245,14 +248,14 @@ for t=T:-1:1 %Backwards step
                 A4=[zeros(96,96*8),eye(96),eye(96),zeros(96,2*96+24),zeros(96,1)];
                 b4=ones(96,1);
                 
-                %restriktionen für Wertunktion
+                %restriktionen fï¿½r Wertunktion
                 AV_neg=zeros(lk-1,12*96+24+1);
                 AV_neg(:,end)=1;
                 AV_neg(:,96)=-VR_abc_neg(:,2); %Speicher
                 AV_neg(:,4*96)=-VR_abc_neg(:,3); %turbine
                 bV_neg=VR_abc_neg(:,1);
                 
-                %restriktionen für Wertunktion
+                %restriktionen fï¿½r Wertunktion
                 AV_pos=zeros(lk-1,12*96+24+1);
                 AV_pos(:,end)=1;
                 AV_pos(:,96)=-VR_abc_neg(:,2); %Speicher
@@ -362,8 +365,8 @@ for m=1:M
                     VRx(i,j)=reshape(Vt(i,j,:,t+1),1,N)*weights;
                 end
             end
-            k=convhull([R_vec',VRx(:,2)]); %Konvexe Hülle für x=0
-            k(1)=[]; %erstes element nicht nötig;
+            k=convhull([R_vec',VRx(:,2)]); %Konvexe Hï¿½lle fï¿½r x=0
+            k(1)=[]; %erstes element nicht nï¿½tig;
             
             lk=length(k);
             %a Achsenabschnitt, b Steigung R, c Steigung x
@@ -467,14 +470,14 @@ for m=1:M
         A4=[zeros(96,96*8),eye(96),eye(96),zeros(96,2*96+24),zeros(96,1)];
         b4=ones(96,1);
         
-        %restriktionen für Wertunktion
+        %restriktionen fï¿½r Wertunktion
         AV_neg=zeros(lk-1,12*96+24+1);
         AV_neg(:,end)=1;
         AV_neg(:,96)=-VR_abc_neg(:,2); %Speicher
         AV_neg(:,4*96)=-VR_abc_neg(:,3); %turbine
         bV_neg=VR_abc_neg(:,1);
         
-        %restriktionen für Wertunktion
+        %restriktionen fï¿½r Wertunktion
         AV_pos=zeros(lk-1,12*96+24+1);
         AV_pos(:,end)=1;
         AV_pos(:,96)=-VR_abc_neg(:,2); %Speicher
@@ -628,14 +631,14 @@ for m=1:M
         A4=[zeros(96,96*8),eye(96),eye(96),zeros(96,2*96+24),zeros(96,1)];
         b4=ones(96,1);
         
-        %restriktionen für Wertunktion
+        %restriktionen fï¿½r Wertunktion
         AV_neg=zeros(lk-1,12*96+24+1);
         AV_neg(:,end)=1;
         AV_neg(:,96)=-VR_abc_neg(:,2); %Speicher
         AV_neg(:,4*96)=-VR_abc_neg(:,3); %turbine
         bV_neg=VR_abc_neg(:,1);
         
-        %restriktionen für Wertunktion
+        %restriktionen fï¿½r Wertunktion
         AV_pos=zeros(lk-1,12*96+24+1);
         AV_pos(:,end)=1;
         AV_pos(:,96)=-VR_abc_neg(:,2); %Speicher

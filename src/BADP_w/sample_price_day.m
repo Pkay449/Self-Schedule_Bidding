@@ -1,6 +1,6 @@
 function [ mu_P, cov_P ] = sample_price_day( Pt_day,t,Season)
 % Pt aktuelle Preise am Day Ahead markt (Zeilenvektor)
-% t= aktuelle STufe ==>samples für Stufe t+1
+% t= aktuelle STufe ==>samples fï¿½r Stufe t+1
 
 % mu_P = Erwartungswerte der Preise
 % cov_P =Kovarianzmatrix
@@ -12,9 +12,12 @@ if(n_arg==0)
 end
 
 
-load(strcat('Data\beta_day_ahead_',Season,'.mat'));
-load(strcat('Data\cov_day_',Season,'.mat'));
-load(strcat('Data\DoW_',Season,'.mat'));
+% load(strcat('Data\beta_day_ahead_',Season,'.mat'));
+load(fullfile('Data', strcat('beta_day_ahead_', Season, '.mat')));
+% load(strcat('Data\cov_day_',Season,'.mat'));
+load(fullfile('Data', strcat('cov_day_', Season, '.mat')));
+% load(strcat('Data\DoW_',Season,'.mat'));
+load(fullfile('Data', strcat('DoW_', Season, '.mat')));
 
 %Reihenfolge Beta
 % intercept, Beta_MO ... Beta_SO, Beta_(t-1,1)...Beta_(t-1,24) ...Beta(t-7,24),

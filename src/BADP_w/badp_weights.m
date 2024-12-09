@@ -9,8 +9,10 @@ Season='Summer';
 
 gamma=1; %discount factor for futres prices
 
-load(strcat('Data\beta_day_ahead_',Season,'.mat'));
-load(strcat('Data\beta_intraday_',Season,'.mat'));
+% load(strcat('Data\beta_day_ahead_',Season,'.mat'));
+load(fullfile('Data', strcat('beta_day_ahead_', Season, '.mat')));
+% load(strcat('Data\beta_intraday_',Season,'.mat'));
+load(fullfile('Data', strcat('beta_intraday_', Season, '.mat')));
 
 
 beta_day_ahead(:,1:8)=[]; %remove const and DoW
