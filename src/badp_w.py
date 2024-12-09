@@ -10,10 +10,14 @@ from badp_weights import badp_weights
 from VRx_weights import VRx_weights
 from sample_price_day import sample_price_day
 from sample_price_intraday import sample_price_intraday
+import os
 
 import warnings
 
 warnings.filterwarnings("ignore")
+
+# set the current working directory
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 N = 50
 M = 10
