@@ -15,6 +15,12 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+import os
+import sys
+
+# set working directory as current file path
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 N = 50
 M = 10
 T = 3
@@ -146,7 +152,7 @@ for t_i in range(T-1, -1, -1):
             # k = k[1:]
             # print(k)
             # break
-            k = np.sort(k)[::-1]
+            k = k[1:]
 
             # Length of k
             lk = len(k)
@@ -164,17 +170,19 @@ for t_i in range(T-1, -1, -1):
             # Build VR_abc_neg, VR_abc_pos similarly as MATLAB code
             # This is left as an exercise due to complexity.
             # For now, assume VR_abc_neg, VR_abc_pos are computed similarly as in MATLAB code.
-            # Loop for VR_abc_neg
-            for i in range(1, lk):  # MATLAB indexing starts from 2; Python indexing starts from 1
-                VR_abc_neg[i - 1, 1] = (VR[i, 1] - VR[i - 1, 1]) / (R_k[i] - R_k[i - 1])  # Steigung R
-                VR_abc_neg[i - 1, 0] = VR[i, 1] - VR_abc_neg[i - 1, 1] * R_k[i]  # Achsenabschnitt
-                VR_abc_neg[i - 1, 2] = -(VR[i - 1, 1] - VR[i - 1, 0]) / (x_vec[1] - x_vec[0])  # Steigung x
+            # For VR_abc_neg:
+            for i in range(1, lk):
+                # i runs 1 to lk-1, corresponding to i=2:lk in MATLAB
+                VR_abc_neg[i-1, 1] = (VR[i, 1] - VR[i-1, 1]) / (R_k[i] - R_k[i-1])  # Steigung R
+                VR_abc_neg[i-1, 0] = VR[i, 1] - VR_abc_neg[i-1, 1] * R_k[i]        # Achsenabschnitt (a)
+                VR_abc_neg[i-1, 2] = -(VR[i-1, 1] - VR_abc_neg[i-1, 0]) / (x_vec[1] - x_vec[0])  # Steigung x
 
-            # Loop for VR_abc_pos
-            for i in range(1, lk):  # MATLAB indexing starts from 2; Python indexing starts from 1
-                VR_abc_pos[i - 1, 1] = (VR[i, 1] - VR[i - 1, 1]) / (R_k[i] - R_k[i - 1])  # Steigung R
-                VR_abc_pos[i - 1, 0] = VR[i, 1] - VR_abc_pos[i - 1, 1] * R_k[i]  # Achsenabschnitt
-                VR_abc_pos[i - 1, 2] = (VR[i - 1, 1] - VR[i - 1, 2]) / (x_vec[1] - x_vec[2])  # Steigung x
+            # For VR_abc_pos:
+            for i in range(1, lk):
+                VR_abc_pos[i-1, 1] = (VR[i, 1] - VR[i-1, 1]) / (R_k[i] - R_k[i-1])  # Steigung R
+                VR_abc_pos[i-1, 0] = VR[i, 1] - VR_abc_pos[i-1, 1] * R_k[i]        # Achsenabschnitt (a)
+                VR_abc_pos[i-1, 2] = (VR[i-1, 1] - VR[i-1, 2]) / (x_vec[1] - x_vec[2])  # Steigung x
+
 
         # For each R and x
         for iR in range(length_R):
@@ -350,9 +358,12 @@ for t_i in range(T-1, -1, -1):
                 integrality = [1 if i in intcon else 0 for i in range(len(f))]
 
                 # Solve the MILP problem
-                result = milp(c=-f, constraints=[ineq_constraints, eq_constraints], bounds=bounds,
-                              integrality=integrality
-                              )
+                result = milp(
+                    c=-f,
+                    constraints=[ineq_constraints, eq_constraints],
+                    bounds=bounds,
+                    integrality=integrality  # Ensure this matches the integer constraints needed
+                )
                 # result = linprog(
                 #     c=-f,            # Coefficients for the objective function (minimize f^T * x)
                 #     A_ub=A,         # Inequality constraint matrix
@@ -935,10 +946,11 @@ for m in range(M):
         x0 = x_pump[-1].copy() - x_turbine[-1].copy()  # Last element of x_pump minus last element of x_turbine
 
         # Update P_day, P_intraday, P_day_sim, P_intraday_sim
-        P_day = np.concatenate((Wt_day, P_day[:-24].copy()))  # Concatenate Wt_day with the first part of P_day excluding last 24
-        P_intraday = np.concatenate((Wt_intraday, P_intraday[:-96].copy()))  # Concatenate Wt_intraday with the first part of P_intraday excluding last 96
-        P_day_sim = np.concatenate((Wt_day, P_day_sim[:-24].copy()))  # Same for P_day_sim
-        P_intraday_sim = np.concatenate((Wt_intraday, P_intraday_sim[:-96].copy()))  # Same for P_intraday_sim
+        P_day = np.concatenate((Wt_day, P_day[:-24]))
+        P_intraday = np.concatenate((Wt_intraday, P_intraday[:-96]))
+        P_day_sim = np.concatenate((Wt_day, P_day_sim[:-24]))
+        P_intraday_sim = np.concatenate((Wt_intraday, P_intraday_sim[:-96]))
+
 
         # Update C with the given formula
         C = C - Delta_td * np.dot(Wt_day, xday_opt) - np.sum(x_pump) * c_grid_fee \
