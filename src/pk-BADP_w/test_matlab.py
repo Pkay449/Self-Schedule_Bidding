@@ -50,25 +50,20 @@ eng.quit()
 
 # %%
 
+sample_price_day_inputs_path = '../BADP_w/debug_sample_price_day.mat'
+sample_price_intraday_inputs_path = '../BADP_w/debug_sample_price_intraday.mat'
+
+# test sample_price_day
+
 # Start MATLAB engine
-import matlab.engine
-
 eng = matlab.engine.start_matlab()
-
-# Define input arguments
-Pt_day = matlab.double([50, 55, 60, 65, 70, 75, 80, 85])  # Example row vector
-t = 1  # Current stage
-Season = "Summer"  # Specify the season
-
-# Call the MATLAB function
-mu_P, cov_P = eng.sample_price_day(Pt_day, t, Season, nargout=2)
-
-print("Mean prices (mu_P):", mu_P)
-print("Covariance matrix (cov_P):", cov_P)
+inputs_day = eng.load(sample_price_day_inputs_path)
+P_day = inputs_day['P_day']
+t = inputs_day['t']
+Season = inputs_day['Season']
+eng.sample_price_day(P_day,t,Season)
 
 
-# Close MATLAB engine
-eng.quit()
 
 
 # %%
