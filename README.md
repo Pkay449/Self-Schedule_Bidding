@@ -31,7 +31,7 @@ TBA
 
 `sample_price_day.py` and `sample_price_intraday.py` to generate price forecasts.
 
-**### **Optimization & Approximation:**
+**Optimization & Approximation:**
 
 `badp_w.py`, `badp_weights.py`, and `VRx_weights.py` implement the dynamic programming and approximation methods.
 
