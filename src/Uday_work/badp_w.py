@@ -385,7 +385,7 @@ for t_i in range(T-1, -1, -1):
 
                 # Update the Vt matrix with the result (assuming `iR, ix, n, t_i` are indices)
                 Vt[iR, ix, n, t_i] = -fval
-print(Vt)
+# print(Vt)
 
 # Forward simulation (similar complexity to backward step)
 np.random.seed(seed + 1)
