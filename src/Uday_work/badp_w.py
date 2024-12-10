@@ -6,8 +6,8 @@ from scipy.spatial import ConvexHull
 # If milp is not available, consider using pulp or mip.
 
 # Import local functions
-from badp_weights_r import badp_weights
-from VRx_weights_pk import VRx_weights
+# from badp_weights import badp_weights
+# from VRx_weights_pk import VRx_weights
 from sample_price_day import sample_price_day
 from sample_price_intraday import sample_price_intraday
 import os
@@ -30,7 +30,13 @@ D = 7  # days in forecast
 np.random.seed(seed)
 Rmax = 100
 
-weights_D_value = badp_weights(T)
+import matlab.engine
+eng = matlab.engine.start_matlab()
+weights_D_value = eng.badp_weights(T)
+weights_D_value = np.array(weights_D_value)
+
+
+# weights_D_value = badp_weights(T)
 
 # Parameters
 t_ramp_pump_up = 2/60
@@ -128,7 +134,13 @@ for t_i in range(T-1, -1, -1):
         if t_i < T-1:
             phi = np.concatenate([P_day_sample_next, P_intraday_sample_next], axis=1)
             Y = np.concatenate([P_day_next, P_intraday_next])
-            weights = VRx_weights(phi, Y, weights_D_value[t_i+1, :].copy())
+            
+            # set phi and Y as MATLAB arrays
+            phi = matlab.double(phi.tolist())
+            Y = matlab.double(Y.tolist())
+            # weights = eng.VRx_weights(phi, Y, weights_D_value[int(t_i+1), :].copy())
+            weights_row = matlab.double(weights_D_value[int(t_i+1), :].tolist())
+            weights = eng.VRx_weights(phi, Y, weights_row)
 
             VRx = np.zeros((length_R, 3))
             for i in range(length_R):
@@ -451,7 +463,14 @@ for m in range(M):
             Y = np.hstack((P_day_next, P_intraday_next))
 
             # Update weights using the VRx_weights function
-            weights = VRx_weights(phi, Y, weights_D_value[t_i + 1, :].copy())
+            
+            # set phi and Y as MATLAB arrays
+            phi = matlab.double(phi.tolist())
+            Y = matlab.double(Y.tolist())
+            # weights = eng.VRx_weights(phi, Y, weights_D_value[int(t_i + 1), :].copy())
+            weights_row = matlab.double(weights_D_value[int(t_i + 1), :].tolist())
+            weights = eng.VRx_weights(phi, Y, weights_row)
+
 
             VRx = np.zeros((length_R, 3))
             for i in range(length_R):
@@ -686,8 +705,13 @@ for m in range(M):
         if t_i < T-1 and np.any(Vt != 0):
             phi = np.hstack((P_day_sample_next, P_intraday_sample_next))
             Y = np.hstack((P_day_next, P_intraday_next))
-
-            weights = VRx_weights(phi, Y, weights_D_value[t_i])
+            
+            # set phi and Y as MATLAB arrays
+            phi = matlab.double(phi.tolist())
+            Y = matlab.double(Y.tolist())
+            weights_row = matlab.double(weights_D_value[int(t_i)].copy().tolist())
+            weights = eng.VRx_weights(phi, Y, weights_row)
+            # weights = eng.VRx_weights(phi, Y, weights_D_value[int(t_i)])
 
             # Initialize VRx as a NumPy array of zeros with shape (length_R, 3)
             VRx = np.zeros((length_R, 3))

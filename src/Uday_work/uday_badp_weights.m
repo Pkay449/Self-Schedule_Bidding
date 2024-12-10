@@ -8,7 +8,6 @@ D=7;    %days in forecast
 Season='Summer';
 
 gamma=1; %discount factor for futres prices
-
 load(strcat('Data\beta_day_ahead_',Season,'.mat'));
 load(strcat('Data\beta_intraday_',Season,'.mat'));
 
