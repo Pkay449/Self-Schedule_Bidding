@@ -24,7 +24,7 @@ M = 10
 T = 3
 Season = 'Summer'
 length_R = 5
-seed = 1
+seed = 2
 
 D = 7  # days in forecast
 np.random.seed(seed)
@@ -386,6 +386,8 @@ for t_i in range(T-1, -1, -1):
                 # Update the Vt matrix with the result (assuming `iR, ix, n, t_i` are indices)
                 Vt[iR, ix, n, t_i] = -fval
 # print(Vt)
+
+np.save('Vt_uday.npy', Vt)
 
 # Forward simulation (similar complexity to backward step)
 np.random.seed(seed + 1)
