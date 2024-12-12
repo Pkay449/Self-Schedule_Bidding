@@ -1,81 +1,100 @@
 import numpy as np
-from scipy.optimize import minimize
-from scipy.optimize import minimize_scalar
-
+from qpsolvers import solve_qp
 
 def VRx_weights(phi, Y, weights_lsqlin):
     """
     Compute the weights to approximate a state.
 
-    Parameters:
-    - phi: 2D array (N x M), each row represents a state, each column a feature.
-    - Y: 1D array (1 x M), the target state.
-    - weights_lsqlin: 1D array (M), feature scaling weights.
+    Parameters
+    ----------
+    phi : np.ndarray
+        An N x D matrix of state samples.
+    Y : np.ndarray
+        A 1 x D vector representing the current state.
+    weights_lsqlin : np.ndarray
+        A D-dimensional vector of weights.
 
-    Returns:
-    - weights: 1D array (N), optimized weights.
+    Returns
+    -------
+    weights : np.ndarray
+        An N-dimensional vector of weights.
     """
-    
-    # Step 1: Ignore constant features
-    weights_lsqlin[np.std(phi, axis=0) < 0.1] = 0
 
-    # Step 2: Compute the weighted Euclidean distance between the states and
-    # the target state
-    dist = np.linalg.norm(
-        (phi - Y[np.newaxis, :]) * weights_lsqlin[np.newaxis, :], axis=1
-    )
+    # Ensure shapes are consistent
+    # phi: N x D
+    # Y: D or 1 x D
+    # weights_lsqlin: D
+    if Y.ndim > 1:
+        Y = Y.flatten()
+    N, D = phi.shape
+    assert Y.shape[0] == D, "Y must be of length D"
+    assert weights_lsqlin.shape[0] == D, "weights_lsqlin must be of length D"
 
-    # Step 3: Compute the kernel distance
-    N = len(phi)  # number of states
+    # Ignore features with std < 0.1 by setting corresponding weights to zero
+    col_std = phi.std(axis=0)
+    weights_lsqlin[col_std < 0.1] = 0
 
-    def kernel_dist(h_kernel):
-        return np.exp(-((dist / h_kernel) ** 2))
+    # Distance computation
+    # dist(n) = norm((phi(n,:) - Y) .* weights_lsqlin)
+    diff = (phi - Y) * weights_lsqlin
+    dist = np.sqrt(np.sum(diff**2, axis=1))
 
-    # Step 4: Solve for h_kernel such that sum(kernel_dist(h_kernel)) = 2 * log(N)
-    def target_function(h_kernel):
-        return np.abs(np.sum(kernel_dist(h_kernel)) - 2 * np.log(N))
+    dist_max = np.min(dist)
+    h_kernel = dist_max / np.sqrt(-np.log(0.5))
 
-    result = minimize_scalar(target_function, bounds=(1e-5, 1e5), method="bounded")
-    h_kernel = result.x
-    opt_kernel_dist = kernel_dist(h_kernel)
+    # Compute kernel distances and adjust h_kernel until sum(kernel_dist) >= 2*log(N)
+    kernel_dist = np.exp(-(dist / h_kernel)**2)
+    while np.sum(kernel_dist) < 2 * np.log(N):
+        h_kernel = h_kernel + 1
+        kernel_dist = np.exp(-(dist / h_kernel)**2)
 
-    # Step 5
-    # Solve the optimization problem
+    lb = -kernel_dist
+    ub = kernel_dist
 
-    lb = -opt_kernel_dist
-    ub = opt_kernel_dist
+    # Construct H and f for the QP
+    # H = phi * diag(weights_lsqlin) * phi'
+    # shape: phi: N x D, diag: D x D, phi': D x N => H: N x N
+    W = np.diag(weights_lsqlin)
+    H = phi @ W @ phi.T
+    # Symmetrize H
+    H = 0.5 * (H + H.T)
 
-    H = phi @ np.diag(weights_lsqlin) @ phi.T
-    c = -phi @ np.diag(weights_lsqlin) @ Y
-    
-    H = (H + H.T) / 2  # Ensure H is symmetric
+    # # After computing H
+    # H = phi @ W @ phi.T
+    # H = 0.5 * (H + H.T)
+    # Add a small regularization to ensure positive definiteness
+    epsilon = 1e-8
+    H += epsilon * np.eye(N)
 
+    # f = -phi * diag(weights_lsqlin) * Y'
+    # Y': D x 1, so result is N x 1
+    f = -(phi @ W @ Y.reshape(-1,1)).flatten()
 
-    # min_w 0.5 * w^T H w + c^T w
-    # s.t. sum(w) = 1
-    #     -kernel_dist <= w <= kernel_dist
+    # Inequality constraints:
+    # A x ≤ b with A=[1; -1], b=[1+eps; -1+eps], eps=0
+    # Actually, MATLAB code:
+    # A=[ones(1,N); -ones(1,N)]
+    # b=[1+eps; -1+eps]
+    # With eps=0, A is 2xN, b is 2x1.
+    A = np.vstack([np.ones((1,N)), -np.ones((1,N))])
+    b = np.array([1, -1])
 
-    def objective(w):
-        return 0.5 * w @ H @ w + c @ w
+    # qpsolvers expects Gx <= h, so G=A and h=b here
+    G = A
+    h = b
 
-    def constraint(w):
-        return np.sum(w) - 1
+    # Bounds: lb ≤ x ≤ ub
+    # qpsolvers directly accepts lb and ub
+    # QP form: minimize (1/2) x^T H x + f^T x
+    # subject to G x ≤ h and lb ≤ x ≤ ub
+    # x = solve_qp(P=H, q=f, G=G, h=h, A=None, b=None, lb=lb, ub=ub, solver="quadprog")
 
-    cons = {"type": "eq", "fun": constraint}
-
-    result = minimize(
-        objective, np.zeros(N), constraints=cons, bounds=list(zip(lb, ub))
-    )
-    weights = result.x
+    try:
+        x = solve_qp(P=H, q=f, G=G, h=h, A=None, b=None, lb=lb, ub=ub, solver="quadprog")
+    except Exception as e:
+        print("QP solver failed:", e)
+        return None
+    # 'x' is the solution which corresponds to 'weights' in MATLAB
+    weights = x
 
     return weights
-
-
-if __name__ == "__main__":
-    phi = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    Y = np.array([3, 5, 7])
-    weights_lsqlin = np.array([1, 0.5, 0.2])
-
-    weights = VRx_weights(phi, Y, weights_lsqlin)
-
-    print("Computed weights:", weights)
