@@ -14,7 +14,12 @@ from VRx_weights_pk import VRx_weights
 from badp_weights_r import badp_weights
 
 # Helper Functions
-from helper import generate_scenarios, compute_weights, build_and_solve_intlinprog
+from helper import (
+    generate_scenarios,
+    compute_weights,
+    build_and_solve_intlinprog,
+    linear_constraints_train,
+)
 
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -30,8 +35,8 @@ if False:  # Example if no arguments are given, just hardcode as in MATLAB
     seed = 2
     Season = "Summer"
 
-N = 50 
-M = 10 
+N = 50
+M = 10
 T = 3
 Season = "Summer"
 length_R = 5
@@ -195,236 +200,29 @@ for t_i in range(T - 1, -1, -1):
                 f[96 * 10 : 96 * 11] -= Q_start_pump
                 f[96 * 11 : 96 * 12] -= Q_start_turbine
 
-                # Linear constraints
-                # A1
-                A1 = np.hstack(
-                    [
-                        -np.eye(96) + np.diag(np.ones(95), -1),
-                        np.zeros((96, 96)),
-                        Delta_ti * beta_pump * np.eye(96),
-                        -Delta_ti / beta_turbine * np.eye(96),
-                        -beta_pump * c_pump_up * np.eye(96),
-                        beta_pump * c_pump_down * np.eye(96),
-                        c_turbine_up / beta_turbine * np.eye(96),
-                        -c_turbine_down / beta_turbine * np.eye(96),
-                        np.zeros((96, 96 * 4 + 24)),
-                        np.zeros((96, 1)),
-                    ]
-                )
-                b1 = np.zeros(96)
-                b1[0] = -R_val
-
-                # A2
-                Axh = np.zeros((96, 24))
-                for h in range(24):
-                    Axh[h * 4 : (h + 1) * 4, h] = -1
-
-                A2 = np.hstack(
-                    [
-                        np.zeros((96, 96)),
-                        -np.eye(96),
-                        np.eye(96),
-                        -np.eye(96),
-                        np.zeros((96, 96 * 8)),
-                        Axh,
-                        np.zeros((96, 1)),
-                    ]
-                )
-                b2 = np.zeros(96)
-
-                A3 = np.hstack(
-                    [
-                        np.zeros((96, 96 * 2)),
-                        np.eye(96) - np.diag(np.ones(95), -1),
-                        np.zeros((96, 96)),
-                        -np.eye(96),
-                        np.eye(96),
-                        np.zeros((96, 96 * 6 + 24)),
-                        np.zeros((96, 1)),
-                    ]
-                )
-                b3 = np.zeros(96)
-                b3[0] = max(x0, 0)
-
-                A4 = np.hstack(
-                    [
-                        np.zeros((96, 96 * 3)),
-                        np.eye(96) - np.diag(np.ones(95), -1),
-                        np.zeros((96, 96 * 2)),
-                        -np.eye(96),
-                        np.eye(96),
-                        np.zeros((96, 96 * 4 + 24)),
-                        np.zeros((96, 1)),
-                    ]
-                )
-                b4 = np.zeros(96)
-                b4[0] = max(-x0, 0)
-
-                # Stack A1, A2, A3, A4 vertically (row-wise)
-                Aeq = np.vstack([A1, A2, A3, A4])
-
-                # Stack b1, b2, b3, b4 vertically (row-wise)
-                beq = np.hstack([b1, b2, b3, b4])
-
-                A1 = np.vstack(
-                    [
-                        np.hstack(
-                            [
-                                np.zeros((96, 96 * 2)),
-                                -np.eye(96),
-                                np.zeros((96, 96 * 5)),
-                                x_min_pump * np.eye(96),
-                                np.zeros((96, 96 * 3 + 24)),
-                                np.zeros((96, 1)),
-                            ]
-                        ),
-                        np.hstack(
-                            [
-                                np.zeros((96, 96 * 2)),
-                                np.eye(96),
-                                np.zeros((96, 96 * 5)),
-                                -x_max_pump * np.eye(96),
-                                np.zeros((96, 96 * 3 + 24)),
-                                np.zeros((96, 1)),
-                            ]
-                        ),
-                        np.hstack(
-                            [
-                                np.zeros((96, 96 * 3)),
-                                -np.eye(96),
-                                np.zeros((96, 96 * 5)),
-                                x_min_turbine * np.eye(96),
-                                np.zeros((96, 96 * 2 + 24)),
-                                np.zeros((96, 1)),
-                            ]
-                        ),
-                        np.hstack(
-                            [
-                                np.zeros((96, 96 * 3)),
-                                np.eye(96),
-                                np.zeros((96, 96 * 5)),
-                                -x_max_turbine * np.eye(96),
-                                np.zeros((96, 96 * 2 + 24)),
-                                np.zeros((96, 1)),
-                            ]
-                        ),
-                    ]
-                )
-
-                b1 = np.zeros(96 * 4)
-
-                A2 = np.hstack(
-                    [
-                        np.zeros((96, 96 * 8)),
-                        np.eye(96) - np.diag(np.ones(95), -1),
-                        np.zeros((96, 96)),
-                        -np.eye(96),
-                        np.zeros((96, 96 + 24)),
-                        np.zeros((96, 1)),
-                    ]
-                )
-
-                # Construct b2
-                b2 = np.zeros(96)
-                b2[0] = float(x0 > 0)
-
-                # Construct A3
-                A3 = np.hstack(
-                    [
-                        np.zeros((96, 96 * 9)),
-                        np.eye(96) - np.diag(np.ones(95), -1),
-                        np.zeros((96, 96)),
-                        -np.eye(96),
-                        np.zeros((96, 24)),
-                        np.zeros((96, 1)),
-                    ]
-                )
-
-                # Construct b3
-                b3 = np.zeros(96)
-                b3[0] = float(x0 < 0)
-
-                A4 = np.hstack(
-                    [
-                        np.zeros((96, 96 * 8)),
-                        np.eye(96),
-                        np.eye(96),
-                        np.zeros((96, 2 * 96 + 24)),
-                        np.zeros((96, 1)),
-                    ]
-                )
-
-                # Construct b4
-                b4 = np.ones(96)
-
-                AV_neg = np.zeros((lk - 1, 12 * 96 + 24 + 1))
-                AV_neg[:, -1] = 1
-                AV_neg[:, 96] = -VR_abc_neg[:, 1].copy()
-                AV_neg[:, 4 * 96] = -VR_abc_neg[:, 2].copy()
-                bV_neg = VR_abc_neg[:, 0].copy()
-
-                AV_pos = np.zeros((lk - 1, 12 * 96 + 24 + 1))
-                AV_pos[:, -1] = 1
-                AV_pos[:, 96] = -VR_abc_neg[:, 1].copy()
-                AV_pos[:, 3 * 96] = -VR_abc_neg[:, 2].copy()
-                bV_pos = VR_abc_pos[:, 0]
-
-                A = np.vstack([A1, A2, A3, A4, AV_neg, AV_pos])
-                b = np.concatenate([b1, b2, b3, b4, bV_neg, bV_pos])
-
-                lb = np.concatenate(
-                    [
-                        np.zeros(96),
-                        -np.inf * np.ones(96),
-                        np.zeros(96 * 10),
-                        -x_max_turbine * np.ones(24),
-                        np.full(1, -np.inf),
-                    ]
-                )
-                ub = np.concatenate(
-                    [
-                        Rmax * np.ones(96),
-                        np.inf * np.ones(96 * 7),
-                        np.ones(96 * 4),
-                        x_max_pump * np.ones(24),
-                        np.full(1, np.inf),
-                    ]
+                A, b, Aeq, beq, lb, ub = linear_constraints_train(
+                    Delta_ti,
+                    beta_pump,
+                    beta_turbine,
+                    c_pump_up,
+                    c_pump_down,
+                    c_turbine_up,
+                    c_turbine_down,
+                    R_val,
+                    x0,
+                    x_min_pump,
+                    x_max_pump,
+                    x_min_turbine,
+                    x_max_turbine,
+                    Rmax,
+                    lk,
+                    VR_abc_neg,
+                    VR_abc_pos,
                 )
 
                 intcon = np.arange(8 * 96, 96 * 10)
-
-                # Convert all arrays to MATLAB doubles
-                matlab_f = matlab.double(
-                    (-f).tolist()
-                )  # since we minimize -f, we pass f as negative
-                matlab_A = matlab.double(A.tolist())
-                matlab_b = matlab.double(b.tolist())
-                matlab_Aeq = matlab.double(Aeq.tolist())
-                matlab_beq = matlab.double(beq.tolist())
-                matlab_lb = matlab.double(lb.tolist())
-                matlab_ub = matlab.double(ub.tolist())
-
-                # Convert intcon to 1-based indexing
-                matlab_intcon = matlab.double((intcon + 1).tolist())
-
-                # Call intlinprog
-                xres, fvalres = eng.intlinprog(
-                    matlab_f,
-                    matlab_intcon,
-                    matlab_A,
-                    matlab_b,
-                    matlab_Aeq,
-                    matlab_beq,
-                    matlab_lb,
-                    matlab_ub,
-                    intlinprog_options,
-                    nargout=2,
-                )
-
-                x_opt = np.array(
-                    xres
-                ).flatten()  # Convert solution vector to a NumPy array
-                fval = float(fvalres)  # Convert fvalres to a float
+                
+                x_opt, fval = build_and_solve_intlinprog(eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options)
 
                 Vt[iR, ix, n, t_i] = -fval
 
