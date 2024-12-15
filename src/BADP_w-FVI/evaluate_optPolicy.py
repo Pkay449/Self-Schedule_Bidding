@@ -147,7 +147,8 @@ for m in range(M):
             Y = np.hstack((P_day_next, P_intraday_next))
 
             # Compute weights for next stage
-            weights = compute_weights(eng, phi, Y, weights_D_value[int(t_i + 1), :])
+            # -weights = compute_weights(eng, phi, Y, weights_D_value[int(t_i + 1), :])
+            weights = VRx_weights(phi, Y, weights_D_value[int(t_i + 1), :])
 
             VRx = np.zeros((length_R, 3))
             for i in range(length_R):

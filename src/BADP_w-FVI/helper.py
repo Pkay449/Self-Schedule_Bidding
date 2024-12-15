@@ -293,3 +293,200 @@ def linear_constraints_train(
     )
 
     return A, b, Aeq, beq, lb, ub
+
+
+def linear_constraints_train_FVI(
+    Delta_ti,
+    beta_pump,
+    beta_turbine,
+    c_pump_up,
+    c_pump_down,
+    c_turbine_up,
+    c_turbine_down,
+    R_val,
+    x0,
+    x_min_pump,
+    x_max_pump,
+    x_min_turbine,
+    x_max_turbine,
+    Rmax,
+):
+    # Construct constraints as before, but without convex hull logic:
+    # A1
+    A1 = np.hstack(
+        [
+            -np.eye(96) + np.diag(np.ones(95), -1),
+            np.zeros((96, 96)),
+            Delta_ti * beta_pump * np.eye(96),
+            -Delta_ti / beta_turbine * np.eye(96),
+            -beta_pump * c_pump_up * np.eye(96),
+            beta_pump * c_pump_down * np.eye(96),
+            c_turbine_up / beta_turbine * np.eye(96),
+            -c_turbine_down / beta_turbine * np.eye(96),
+            np.zeros((96, 96 * 4 + 24)),
+            np.zeros((96, 1)),
+        ]
+    )
+    b1 = np.zeros(96)
+    b1[0] = -R_val
+
+    # A2
+    Axh = np.zeros((96, 24))
+    for h in range(24):
+        Axh[h * 4:(h + 1) * 4, h] = -1
+
+    A2 = np.hstack(
+        [
+            np.zeros((96, 96)),
+            -np.eye(96),
+            np.eye(96),
+            -np.eye(96),
+            np.zeros((96, 96 * 8)),
+            Axh,
+            np.zeros((96, 1)),
+        ]
+    )
+    b2 = np.zeros(96)
+
+    A3 = np.hstack(
+        [
+            np.zeros((96, 96*2)),
+            np.eye(96) - np.diag(np.ones(95), -1),
+            np.zeros((96, 96)),
+            -np.eye(96),
+            np.eye(96),
+            np.zeros((96, 96*6 + 24)),
+            np.zeros((96, 1)),
+        ]
+    )
+    b3 = np.zeros(96)
+    b3[0] = max(x0, 0)
+
+    A4 = np.hstack(
+        [
+            np.zeros((96, 96*3)),
+            np.eye(96) - np.diag(np.ones(95), -1),
+            np.zeros((96, 96*2)),
+            -np.eye(96),
+            np.eye(96),
+            np.zeros((96, 96*4 + 24)),
+            np.zeros((96, 1)),
+        ]
+    )
+    b4 = np.zeros(96)
+    b4[0] = max(-x0, 0)
+
+    Aeq = np.vstack([A1, A2, A3, A4])
+    beq = np.hstack([b1, b2, b3, b4])
+
+    # Constraints for pump and turbine power limits
+    A1 = np.vstack(
+        [
+            np.hstack(
+                [
+                    np.zeros((96, 96*2)),
+                    -np.eye(96),
+                    np.zeros((96, 96*5)),
+                    x_min_pump * np.eye(96),
+                    np.zeros((96, 96*3+24)),
+                    np.zeros((96, 1)),
+                ]
+            ),
+            np.hstack(
+                [
+                    np.zeros((96, 96*2)),
+                    np.eye(96),
+                    np.zeros((96, 96*5)),
+                    -x_max_pump * np.eye(96),
+                    np.zeros((96, 96*3+24)),
+                    np.zeros((96, 1)),
+                ]
+            ),
+            np.hstack(
+                [
+                    np.zeros((96, 96*3)),
+                    -np.eye(96),
+                    np.zeros((96, 96*5)),
+                    x_min_turbine * np.eye(96),
+                    np.zeros((96, 96*2+24)),
+                    np.zeros((96, 1)),
+                ]
+            ),
+            np.hstack(
+                [
+                    np.zeros((96, 96*3)),
+                    np.eye(96),
+                    np.zeros((96, 96*5)),
+                    -x_max_turbine * np.eye(96),
+                    np.zeros((96, 96*2+24)),
+                    np.zeros((96, 1)),
+                ]
+            ),
+        ]
+    )
+    b1 = np.zeros(96*4)
+
+    # Additional constraints if needed:
+    A2 = np.hstack(
+        [
+            np.zeros((96, 96*8)),
+            np.eye(96) - np.diag(np.ones(95), -1),
+            np.zeros((96, 96)),
+            -np.eye(96),
+            np.zeros((96, 96+24)),
+            np.zeros((96, 1)),
+        ]
+    )
+    b2 = np.zeros(96)
+    b2[0] = float(x0 > 0)
+
+    A3 = np.hstack(
+        [
+            np.zeros((96, 96*9)),
+            np.eye(96)-np.diag(np.ones(95),-1),
+            np.zeros((96,96)),
+            -np.eye(96),
+            np.zeros((96,24)),
+            np.zeros((96,1))
+        ]
+    )
+    b3 = np.zeros(96)
+    b3[0] = float(x0 < 0)
+
+    A4 = np.hstack(
+        [
+            np.zeros((96,96*8)),
+            np.eye(96),
+            np.eye(96),
+            np.zeros((96,2*96+24)),
+            np.zeros((96,1))
+        ]
+    )
+    b4 = np.ones(96)
+
+    # Remove AV_neg and AV_pos logic entirely since no convex hull:
+    # No VR_abc_neg or VR_abc_pos usage.
+
+    A = np.vstack([A1, A2, A3, A4])
+    b = np.concatenate([b1, b2, b3, b4])
+
+    lb = np.concatenate(
+        [
+            np.zeros(96),
+            -np.inf * np.ones(96),
+            np.zeros(96*10),
+            -x_max_turbine * np.ones(24),
+            np.full(1, -np.inf),
+        ]
+    )
+    ub = np.concatenate(
+        [
+            Rmax * np.ones(96),
+            np.inf * np.ones(96*7),
+            np.ones(96*4),
+            x_max_pump * np.ones(24),
+            np.full(1, np.inf),
+        ]
+    )
+
+    return A, b, Aeq, beq, lb, ub
