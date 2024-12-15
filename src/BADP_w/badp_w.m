@@ -10,7 +10,7 @@ if(nargin==0)
     N=50;
     T=3;
     M=10;
-    seed=1;
+    seed=2;
     Season='Summer';
 end
 

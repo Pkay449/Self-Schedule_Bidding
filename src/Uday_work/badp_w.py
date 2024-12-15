@@ -905,8 +905,8 @@ for m in range(M):
         integrality = [1 if i in intcon else 0 for i in range(len(f))]
 
         # Solve the MILP problem
-        result = milp(c=-f, constraints=[ineq_constraints, eq_constraints], bounds=bounds
-                    #   integrality=integrality
+        result = milp(c=-f, constraints=[ineq_constraints, eq_constraints], bounds=bounds,
+                    integrality=integrality
                       )
         # result = linprog(
         #     c=-f,            # Coefficients for the objective function (minimize f^T * x)
