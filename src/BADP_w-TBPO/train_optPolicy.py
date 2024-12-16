@@ -49,14 +49,13 @@ import numpy as np
 import pickle
 
 #------------------------
-# Load Data (Example)
+# Load Data
 #------------------------
-
 def load_offline_data_da(path):
     with open(path, 'rb') as f:
         df = pickle.load(f)
     states = np.stack(df['state'].values)
-    actions = np.stack(df['action'].values)
+    actions = np.stack(df['action'].values) # now treated as continuous
     rewards = df['reward'].values
     next_states = np.stack(df['next_state'].values)
     return states, actions, rewards, next_states
@@ -65,12 +64,11 @@ def load_offline_data_id(path):
     with open(path, 'rb') as f:
         df = pickle.load(f)
     states = np.stack(df['state'].values)
-    actions = np.stack(df['action'].values)
+    actions = np.stack(df['action'].values) # now treated as continuous
     rewards = df['reward'].values
     next_states = np.stack(df['next_state'].values)
     return states, actions, rewards, next_states
 
-# Simple helper to create batches
 def batch_iter(data, batch_size, shuffle=True):
     states, actions, rewards, next_states = data
     N = len(states)
@@ -81,20 +79,16 @@ def batch_iter(data, batch_size, shuffle=True):
         idx = indices[start:start+batch_size]
         yield (states[idx], actions[idx], rewards[idx], next_states[idx])
 
-
 #------------------------
 # Model Definitions
 #------------------------
-
 class QNetworkDA(nn.Module):
     state_dim: int = 842
     action_dim: int = 24
     hidden_dim: int = 256
-
     @nn.compact
     def __call__(self, state, action):
-        # state: (batch, state_dim)
-        # action: (batch, action_dim)
+        # action is continuous now, just ensure float32
         x = jnp.concatenate([state, action.astype(jnp.float32)], axis=-1)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
@@ -107,7 +101,6 @@ class QNetworkID(nn.Module):
     state_dim: int = 890
     action_dim: int = 1177
     hidden_dim: int = 256
-
     @nn.compact
     def __call__(self, state, action):
         x = jnp.concatenate([state, action.astype(jnp.float32)], axis=-1)
@@ -121,44 +114,40 @@ class QNetworkID(nn.Module):
 class PolicyDA(nn.Module):
     state_dim: int = 842
     action_dim: int = 24
-    num_action_values: int = 10
-
+    hidden_dim: int = 256
     @nn.compact
     def __call__(self, state):
-        # state: (batch, state_dim)
-        x = nn.Dense(256)(state)
+        x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
-        x = nn.Dense(self.action_dim * self.num_action_values)(x)
-        logits = x.reshape(-1, self.action_dim, self.num_action_values)
-        return logits
+        x = nn.Dense(self.hidden_dim)(x)
+        x = nn.relu(x)
+        # Output a vector of action_dim floats (continuous actions)
+        actions = nn.Dense(self.action_dim)(x)
+        return actions
 
 class PolicyID(nn.Module):
     state_dim: int = 890
     action_dim: int = 1177
-    num_action_values: int = 10
-
+    hidden_dim: int = 256
     @nn.compact
     def __call__(self, state):
-        x = nn.Dense(256)(state)
+        x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
-        x = nn.Dense(self.action_dim * self.num_action_values)(x)
-        logits = x.reshape(-1, self.action_dim, self.num_action_values)
-        return logits
-
-
-#------------------------
-# Initialize Models & Optimizers
-#------------------------
+        x = nn.Dense(self.hidden_dim)(x)
+        x = nn.relu(x)
+        # Output a vector of action_dim floats (continuous actions)
+        actions = nn.Dense(self.action_dim)(x)
+        return actions
 
 # Initialize PRNGKeys
 key = jax.random.PRNGKey(0)
 da_key, id_key, pda_key, pid_key = jax.random.split(key, 4)
 
-# Dummy inputs for initialization
+# Dummy inputs for initialization (continuous actions)
 dummy_s_da = jnp.ones((1, 842))
-dummy_a_da = jnp.ones((1, 24), dtype=jnp.int32)
+dummy_a_da = jnp.ones((1, 24), dtype=jnp.float32)
 dummy_s_id = jnp.ones((1, 890))
-dummy_a_id = jnp.ones((1, 1177), dtype=jnp.int32)
+dummy_a_id = jnp.ones((1, 1177), dtype=jnp.float32)
 
 q_da_model = QNetworkDA()
 q_id_model = QNetworkID()
@@ -173,42 +162,41 @@ policy_id_params = policy_id_model.init(pid_key, dummy_s_id)
 q_da_target_params = q_da_params
 q_id_target_params = q_id_params
 
-# Create optimizers
-learning_rate_q_da = 1e-4
-learning_rate_q_id = 1e-4
-learning_rate_p_da = 1e-5
-learning_rate_p_id = 1e-5
-q_da_opt = optax.adam(learning_rate_q_da)
-q_id_opt = optax.adam(learning_rate_q_id)
-policy_da_opt = optax.adam(learning_rate_p_da)
-policy_id_opt = optax.adam(learning_rate_p_id)
+learning_rate = 1e-3
+q_da_opt = optax.adam(learning_rate)
+q_id_opt = optax.adam(learning_rate)
+policy_da_opt = optax.adam(learning_rate)
+policy_id_opt = optax.adam(learning_rate)
 
 q_da_opt_state = q_da_opt.init(q_da_params)
 q_id_opt_state = q_id_opt.init(q_id_params)
+policy_da_opt_state = policy_da_opt.init(policy_da_params)
+policy_id_opt_state = policy_id_opt.init(policy_id_params)
 
 gamma = 0.99
 batch_size = 64
 num_epochs = 10
 
-# Load data (adjust paths as needed)
 da_data = load_offline_data_da("Results/offline_dataset_day_ahead.pkl")
 id_data = load_offline_data_id("Results/offline_dataset_intraday.pkl")
-
-#------------------------
-# Loss Functions & Update Steps
-#------------------------
 
 def mse_loss(pred, target):
     return jnp.mean((pred - target)**2)
 
+def soft_update(target_params, online_params, tau=0.005):
+    return jax.tree_util.tree_map(lambda tp, op: tp*(1-tau) + op*tau, target_params, online_params)
+
 @jax.jit
-def update_q_id(q_id_params, q_id_opt_state, q_id_target_params, s_id, a_id, r_id, s_id_next):
-    # For intraday Q-learning, if terminal at ID stage:
-    q_target = r_id  # no future stage considered here
+def update_q_id(q_id_params, q_id_opt_state, q_id_target_params, q_da_target_params, policy_da_params,
+                s_id, a_id, r_id, s_da_next):
+    # Q_ID target: R_t^{ID} + gamma * Q_DA(s_{t+1}^{DA}, policy_DA(s_{t+1}^{DA}))
+    next_da_actions = policy_da_model.apply(policy_da_params, s_da_next)
+    q_da_values = q_da_model.apply(q_da_target_params, s_da_next, next_da_actions)
+    q_target_id = r_id + gamma * q_da_values
 
     def loss_fn(params):
         q_estimate = q_id_model.apply(params, s_id, a_id)
-        return mse_loss(q_estimate, q_target), q_estimate
+        return mse_loss(q_estimate, q_target_id), q_estimate
 
     grads, (q_estimate) = jax.grad(loss_fn, has_aux=True)(q_id_params)
     updates, q_id_opt_state_new = q_id_opt.update(grads, q_id_opt_state)
@@ -217,12 +205,10 @@ def update_q_id(q_id_params, q_id_opt_state, q_id_target_params, s_id, a_id, r_i
 
 @jax.jit
 def update_q_da(q_da_params, q_da_opt_state, q_da_target_params, q_id_target_params, 
-                policy_id_params, s_da, a_da, r_da, s_da_next):
-    # Compute target:
-    # Choose best a_id from policy_id (greedy)
-    logits_id = policy_id_model.apply(policy_id_params, s_da_next)
-    best_id_actions = jnp.argmax(logits_id, axis=-1)  # (batch, 1177)
-    q_id_values = q_id_model.apply(q_id_target_params, s_da_next, best_id_actions)
+                policy_id_params, s_da, a_da, r_da, s_id_next):
+    # Q_DA target: R_t^{DA} + gamma * Q_ID(s_{t}^{ID}, policy_ID(s_{t}^{ID}))
+    next_id_actions = policy_id_model.apply(policy_id_params, s_id_next)
+    q_id_values = q_id_model.apply(q_id_target_params, s_id_next, next_id_actions)
     q_target_da = r_da + gamma * q_id_values
 
     def loss_fn(params):
@@ -235,70 +221,88 @@ def update_q_da(q_da_params, q_da_opt_state, q_da_target_params, q_id_target_par
     q_da_params_new = optax.apply_updates(q_da_params, updates)
     return q_da_params_new, q_da_opt_state_new, q_da_values
 
-
-# Soft update targets
 @jax.jit
-def soft_update(target_params, online_params, tau=0.005):
-    return jax.tree_util.tree_map(lambda tp, op: tp*(1-tau) + op*tau, target_params, online_params)
+def update_policy_da(policy_da_params, policy_da_opt_state, q_da_params, s_da):
+    # Deterministic policy gradient: maximize Q(s, pi(s))
+    # loss = -mean(Q(s, pi(s)))
+    def loss_fn(params):
+        a_da = policy_da_model.apply(params, s_da)  # continuous actions
+        q_values = q_da_model.apply(q_da_params, s_da, a_da)
+        return -jnp.mean(q_values)
+    grads = jax.grad(loss_fn)(policy_da_params)
+    updates, policy_da_opt_state_new = policy_da_opt.update(grads, policy_da_opt_state)
+    policy_da_params_new = optax.apply_updates(policy_da_params, updates)
+    return policy_da_params_new, policy_da_opt_state_new
+
+@jax.jit
+def update_policy_id(policy_id_params, policy_id_opt_state, q_id_params, s_id):
+    # Similarly for ID: maximize Q(s, pi(s))
+    def loss_fn(params):
+        a_id = policy_id_model.apply(params, s_id)
+        q_values = q_id_model.apply(q_id_params, s_id, a_id)
+        return -jnp.mean(q_values)
+    grads = jax.grad(loss_fn)(policy_id_params)
+    updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
+    policy_id_params_new = optax.apply_updates(policy_id_params, updates)
+    return policy_id_params_new, policy_id_opt_state_new
 
 #------------------------
 # Training Loop
 #------------------------
 for epoch in range(num_epochs):
-    # Train Q_ID
-    for s_id, a_id, r_id, s_id_next in batch_iter(id_data, batch_size, shuffle=True):
+    # Train Q_ID and then Policy_ID
+    for s_id, a_id, r_id, s_da_next in batch_iter(id_data, batch_size, shuffle=True):
         s_id = jnp.array(s_id, dtype=jnp.float32)
-        a_id = jnp.array(a_id, dtype=jnp.int32)
+        a_id = jnp.array(a_id, dtype=jnp.float32)  # continuous now
         r_id = jnp.array(r_id, dtype=jnp.float32).reshape(-1,1)
-        s_id_next = jnp.array(s_id_next, dtype=jnp.float32)
+        s_da_next = jnp.array(s_da_next, dtype=jnp.float32)
 
         q_id_params, q_id_opt_state, q_est_id = update_q_id(q_id_params, q_id_opt_state, q_id_target_params,
-                                                            s_id, a_id, r_id, s_id_next)
+                                                            q_da_target_params, policy_da_params,
+                                                            s_id, a_id, r_id, s_da_next)
+        # Update ID policy: now just maximize Q(s, pi(s))
+        policy_id_params, policy_id_opt_state = update_policy_id(policy_id_params, policy_id_opt_state, q_id_params, s_id)
 
-    # Train Q_DA
-    for s_da, a_da, r_da, s_da_next in batch_iter(da_data, batch_size, shuffle=True):
+    # Train Q_DA and then Policy_DA
+    for s_da, a_da, r_da, s_id_next in batch_iter(da_data, batch_size, shuffle=True):
         s_da = jnp.array(s_da, dtype=jnp.float32)
-        a_da = jnp.array(a_da, dtype=jnp.int32)
+        a_da = jnp.array(a_da, dtype=jnp.float32)
         r_da = jnp.array(r_da, dtype=jnp.float32).reshape(-1,1)
-        s_da_next = jnp.array(s_da_next, dtype=jnp.float32)
+        s_id_next = jnp.array(s_id_next, dtype=jnp.float32)
 
         q_da_params, q_da_opt_state, q_est_da = update_q_da(q_da_params, q_da_opt_state, q_da_target_params, 
                                                             q_id_target_params, policy_id_params, 
-                                                            s_da, a_da, r_da, s_da_next)
+                                                            s_da, a_da, r_da, s_id_next)
+        # Update DA policy
+        policy_da_params, policy_da_opt_state = update_policy_da(policy_da_params, policy_da_opt_state, q_da_params, s_da)
 
-    # Soft update target networks
     q_da_target_params = soft_update(q_da_target_params, q_da_params)
     q_id_target_params = soft_update(q_id_target_params, q_id_params)
 
-    # For demonstration, we print the last losses of the epoch.
-    # Note: q_est_da and q_est_id here are the predictions, not direct losses.
-    # If needed, you could track the actual loss inside the update functions.
     print(f"Epoch {epoch+1}/{num_epochs} finished.")
 
-
+#%%
 #------------------------
 # Using the Policy
 #------------------------
-# Sample action from DA policy:
 def sample_action_da(policy_da_params, s_da_example):
-    logits = policy_da_model.apply(policy_da_params, s_da_example)
-    chosen = jnp.argmax(logits, axis=-1)  # (1, 24)
-    return chosen
+    # now returns continuous action vector
+    actions = policy_da_model.apply(policy_da_params, s_da_example)
+    return actions
 
 def sample_action_id(policy_id_params, s_id_example):
-    logits = policy_id_model.apply(policy_id_params, s_id_example)
-    chosen = jnp.argmax(logits, axis=-1)  # (1, 1177)
-    return chosen
+    # returns continuous action vector
+    actions = policy_id_model.apply(policy_id_params, s_id_example)
+    return actions
 
+#%%
+# Example usage:
 s_da_example = jnp.ones((1, 842), dtype=jnp.float32)
 da_action = sample_action_da(policy_da_params, s_da_example)
-
 s_id_example = jnp.ones((1, 890), dtype=jnp.float32)
 id_action = sample_action_id(policy_id_params, s_id_example)
 
-print("Selected DA action:", da_action)
-print("Selected ID action:", id_action)
-
-# %%
+print("Selected DA action (continuous):", da_action)
+print("Selected ID action (continuous):", id_action)
 
 # %%
