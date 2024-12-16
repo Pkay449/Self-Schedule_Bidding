@@ -38,7 +38,7 @@ if False:  # Example if no arguments are given, just hardcode as in MATLAB
 
 N = 50
 M = 50
-T = 30
+T = 3
 Season = "Summer"
 length_R = 5
 seed = 2
@@ -661,3 +661,6 @@ def evaluate_optPolicy_2series():
     
     return EV
 # %%
+
+if __name__ == "__main__":
+    evaluate_optPolicy_2series()
