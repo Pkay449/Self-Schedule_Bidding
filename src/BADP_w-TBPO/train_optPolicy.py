@@ -25,19 +25,19 @@ import os
 da_path = 'Results/offline_dataset_day_ahead.pkl'
 id_path = 'Results/offline_dataset_intraday.pkl'
 
-da_data = pkl.load(open(da_path, 'rb'))
-id_data = pkl.load(open(id_path, 'rb'))
+da_df = pkl.load(open(da_path, 'rb'))
+id_df = pkl.load(open(id_path, 'rb'))
 
 # %%
 
 # print shapes:
 print('Day-ahead data:')
-for key in da_data.keys():
-    print(f'Day Ahead : {key}, {da_data[key][2].shape}')
+for key in da_df.keys():
+    print(f'Day Ahead : {key}, {da_df[key][2].shape}')
 # %%
 print('Intraday data:')
-for key in id_data.keys():
-    print(f'Intraday : {key}, {id_data[key][2].shape}')
+for key in id_df.keys():
+    print(f'Intraday : {key}, {id_df[key][2].shape}')
 # %%
 
 import jax
@@ -298,5 +298,7 @@ id_action = sample_action_id(policy_id_params, s_id_example)
 
 print("Selected DA action:", da_action)
 print("Selected ID action:", id_action)
+
+# %%
 
 # %%
