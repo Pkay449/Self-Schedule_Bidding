@@ -5,11 +5,8 @@ from scipy.io import loadmat
 from scipy.stats import multivariate_normal
 from scipy.spatial import ConvexHull
 import os
-import pickle as pkl
 import warnings
 import matlab.engine
-
-# %%
 
 # Local imports
 from sample_price_day import sample_price_day
@@ -40,8 +37,8 @@ if False:  # Example if no arguments are given, just hardcode as in MATLAB
     Season = "Summer"
 
 N = 50
-M = 10
-T = 3
+M = 50
+T = 30
 Season = "Summer"
 length_R = 5
 seed = 2
@@ -88,44 +85,22 @@ P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_{Season}.mat"))
 P_day_0 = P_day_mat["P_day_0"].flatten()
 P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
 
-# Start MATLAB engine
-eng = matlab.engine.start_matlab()
 
-
-def evaluate_policy():
-    """Also collect offline dataset"""
+def evaluate_optPolicy_2series():
+    # Start MATLAB engine
+    eng = matlab.engine.start_matlab()
 
     # weights_D_value_mat = eng.badp_weights(T)
     # weights_D_value = np.array(weights_D_value_mat)
-
-    # Collect offline dataset [s , a, r, s']
-    # s = [x_start, R_start, P_day, P_intraday] 2 + 7*24 + 7*96
-    # a = [day_opt, xhq_opt] 24 + 96
-    # r = C
-    # s' = [x_end, R_end, P_day_next, P_intraday_next] 2 + 7*24 + 7*96
-
-    DA_s_offline = []
-    DA_a_offline = []
-    DA_r_offline = []
-    DA_s_prime_offline = []
-    
-    ID_s_offline = []
-    ID_a_offline = []
-    ID_r_offline = []
-    ID_s_prime_offline = []
 
     weights_D_value = badp_weights(T)
 
     intlinprog_options = eng.optimoptions("intlinprog", "display", "off")
 
     np.random.seed(seed + 1)
-    (
-        sample_P_day_all_fwd,
-        sample_P_intraday_all_fwd,
-        Wt_day_mat_fwd,
-        Wt_intra_mat_fwd,
-    ) = generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed + 1)
-    
+    sample_P_day_all_fwd, sample_P_intraday_all_fwd, Wt_day_mat_fwd, Wt_intra_mat_fwd = (
+        generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed + 1)
+    )
 
     R_0 = 0
     x0_0 = 0
@@ -141,6 +116,16 @@ def evaluate_policy():
     y_turbine_path = np.zeros((M, 96 * T))
     z_pump_path = np.zeros((M, 96 * T))
     z_turbine_path = np.zeros((M, 96 * T))
+
+    da_s = [] # R_Start , x_start, P_history = 1 + 1 + 24*7 + 96*7
+    da_a = []
+    da_r = []
+    da_s_prime = [] # Da_s + x_day_opt + Wt+1_day 
+
+    id_s = []
+    id_a = []
+    id_r = []
+    id_s_prime = []
 
     for m in range(M):
         R = R_0
@@ -165,20 +150,21 @@ def evaluate_policy():
             VR_abc_neg = np.zeros((lk - 1, 3))
             VR_abc_pos = np.zeros((lk - 1, 3))
 
+            da_state = np.concatenate([[R], [x0], P_day, P_intraday])
+
+            da_s.append(da_state)
+
             # If we have another stage ahead and Vt is not empty, we need to compute weights and slopes again
             if t_i < T - 1 and np.any(Vt != 0):
                 # Extract scenarios for next stage
                 P_day_sample_next = P_day_state[:, t_i + 1, :].reshape(N, D * 24)
-                P_intraday_sample_next = P_intra_state[:, t_i + 1, :].reshape(
-                    N, D * 24 * 4
-                )
+                P_intraday_sample_next = P_intra_state[:, t_i + 1, :].reshape(N, D * 24 * 4)
 
                 phi = np.hstack((P_day_sample_next, P_intraday_sample_next))
                 Y = np.hstack((P_day_next, P_intraday_next))
 
                 # Compute weights for next stage
-                # -weights = compute_weights(eng, phi, Y, weights_D_value[int(t_i + 1), :])
-                weights = VRx_weights(phi, Y, weights_D_value[int(t_i + 1), :])
+                weights = compute_weights(eng, phi, Y, weights_D_value[int(t_i + 1), :])
 
                 VRx = np.zeros((length_R, 3))
                 for i in range(length_R):
@@ -232,9 +218,7 @@ def evaluate_policy():
             q_pump_up = (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_pump_up / 2
             q_pump_down = (abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_pump_down / 2
             q_turbine_up = (abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_turbine_up / 2
-            q_turbine_down = (
-                (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_turbine_down / 2
-            )
+            q_turbine_down = (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_turbine_down / 2
 
             f[96 * 2 : 96 * 3] -= c_grid_fee
             f[96 * 4 : 96 * 5] += q_pump_up
@@ -443,23 +427,24 @@ def evaluate_policy():
 
             xday_opt = x_opt[-25:-1].copy()
 
+            da_a.append(xday_opt)
+
             Wt_day = Wt_day_mat_fwd[m, t_i * 24 : (t_i + 1) * 24].copy()
             day_path = np.tile(Wt_day, (4, 1))
             P_day_path[m, t_i * 96 : (t_i + 1) * 96] = day_path.flatten()
+
+            da_r.append(-Delta_td*np.dot(Wt_day, xday_opt))
 
             mu_intraday, _ = sample_price_intraday(
                 np.concatenate([Wt_day, P_day_sim]), P_intraday_sim, t_i, Season
             )
 
             P_day_next = np.concatenate([Wt_day, P_day[:-24].copy()])
+            da_next_state = np.concatenate([da_state, xday_opt, Wt_day])
+
+            da_s_prime.append(da_next_state)
+            id_s.append(da_next_state)
             P_intraday_next = np.concatenate([mu_intraday, P_intraday[:-96].copy()])
-            
-            
-            
-            
-            
-            
-            
 
             # Now solve the second MILP (intraday) with xday_opt as bounds
             # Build f again for intraday stage
@@ -470,9 +455,7 @@ def evaluate_policy():
             q_pump_up = (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_pump_up / 2
             q_pump_down = (abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_pump_down / 2
             q_turbine_up = (abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_turbine_up / 2
-            q_turbine_down = (
-                (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_turbine_down / 2
-            )
+            q_turbine_down = (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_turbine_down / 2
             f[96 * 2 : 96 * 3] -= c_grid_fee
             f[96 * 4 : 96 * 5] += q_pump_up
             f[96 * 5 : 96 * 6] -= q_pump_down
@@ -581,6 +564,8 @@ def evaluate_policy():
                 eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options
             )
 
+            id_a.append(x_opt2)
+
             # Extract results from x_opt2
             R_opt = x_opt2[:96].copy()
             xhq_opt = x_opt2[96 : 2 * 96].copy()
@@ -613,15 +598,10 @@ def evaluate_policy():
             # Update q_ ramps with realized intraday prices
             q_pump_up = (np.abs(Wt_intraday) / Q_mult - Q_fix) * t_ramp_pump_up / 2
             q_pump_down = (np.abs(Wt_intraday) * Q_mult + Q_fix) * t_ramp_pump_down / 2
-            q_turbine_up = (
-                (np.abs(Wt_intraday) * Q_mult + Q_fix) * t_ramp_turbine_up / 2
-            )
+            q_turbine_up = (np.abs(Wt_intraday) * Q_mult + Q_fix) * t_ramp_turbine_up / 2
             q_turbine_down = (
                 (np.abs(Wt_intraday) / Q_mult - Q_fix) * t_ramp_turbine_down / 2
             )
-
-            state = np.concatenate([[x0], [R], P_day, P_intraday])
-            action = np.concatenate([xday_opt, xhq_opt])
 
             # Update R, x0, P_day, P_intraday, P_day_sim, P_intraday_sim
             R = R_opt[-1].copy()
@@ -631,24 +611,28 @@ def evaluate_policy():
             P_day_sim = np.concatenate([Wt_day, P_day_sim[:-24].copy()])
             P_intraday_sim = np.concatenate([Wt_intraday, P_intraday_sim[:-96].copy()])
 
-            next_state = np.concatenate([[x0], [R], P_day, P_intraday])
+            id_r.append(- np.sum(x_pump)*c_grid_fee \
+                - Delta_ti*np.dot(Wt_intraday, xhq_opt) \
+                + np.dot(q_pump_up, Delta_pump_up) - np.dot(q_pump_down, Delta_pump_down) \
+                - np.dot(q_turbine_up, Delta_turbine_up) + np.dot(q_turbine_down, Delta_turbine_down) \
+                - np.sum(z_pump)*Q_start_pump - np.sum(z_turbine)*Q_start_turbine)
+
+            next_state = np.concatenate([[R], [x0], P_day, P_intraday])
+            id_s_prime.append(next_state)
 
             # Update C
-            reward = (-Delta_td * np.dot(Wt_day, xday_opt)
-                                 - np.sum(x_pump) * c_grid_fee
-                                 - Delta_ti * np.dot(Wt_intraday, xhq_opt)
-                                 + np.dot(q_pump_up, Delta_pump_up)
-                                 - np.dot(q_pump_down, Delta_pump_down)
-                                 - np.dot(q_turbine_up, Delta_turbine_up)
-                                 + np.dot(q_turbine_down, Delta_turbine_down)
-                                 - np.sum(z_pump) * Q_start_pump
-                                 - np.sum(z_turbine) * Q_start_turbine)
-            C += reward
-
-            s_offline.append(state)
-            a_offline.append(action)
-            r_offline.append(reward)
-            s_prime_offline.append(next_state)
+            C = (
+                C
+                - Delta_td * np.dot(Wt_day, xday_opt)
+                - np.sum(x_pump) * c_grid_fee
+                - Delta_ti * np.dot(Wt_intraday, xhq_opt)
+                + np.dot(q_pump_up, Delta_pump_up)
+                - np.dot(q_pump_down, Delta_pump_down)
+                - np.dot(q_turbine_up, Delta_turbine_up)
+                + np.dot(q_turbine_down, Delta_turbine_down)
+                - np.sum(z_pump) * Q_start_pump
+                - np.sum(z_turbine) * Q_start_turbine
+            )
 
         V[m] = C
 
@@ -656,17 +640,24 @@ def evaluate_policy():
     print(EV)
     
     # Save offline dataset as pickle
-    df = pd.DataFrame({
-        'state': s_offline,
-        'action': a_offline,
-        'reward': r_offline,
-        'next_state': s_prime_offline
+    
+    df_da = pd.DataFrame({
+        'state': da_s,
+        'action': da_a,
+        'reward': da_r,
+        'next_state': da_s_prime
     })
-    df.to_pickle('Results/offline_dataset.pkl')
-
-
+    
+    df_da.to_pickle("Results/offline_dataset_day_ahead.pkl")
+    
+    df_id = pd.DataFrame({
+        'state': id_s,
+        'action': id_a,
+        'reward': id_r,
+        'next_state': id_s_prime
+    })
+    
+    df_id.to_pickle("Results/offline_dataset_intraday.pkl")
+    
     return EV
-
-
-if __name__ == "__main__":
-    evaluate_policy()
+# %%

@@ -1,246 +1,171 @@
+# %%[markdown]
+# #### Neural Fitted Q-Iteration with Continuous Actions (NFQCA)
+
+# **Input** MDP $(S, A, P, R, \gamma)$, base points $\mathcal{B}$, Q-function $q(s,a; \boldsymbol{\theta})$, policy $d(s; \boldsymbol{w})$
+
+# **Output** Parameters $\boldsymbol{\theta}$ for Q-function, $\boldsymbol{w}$ for policy
+
+# 1. Initialize $\boldsymbol{\theta}_0$, $\boldsymbol{w}_0$
+# 2. **for** $n = 0,1,2,...$ **do**
+#     1. $\mathcal{D}_q \leftarrow \emptyset$
+#     2. For each $(s,a,r,s') \in \mathcal{B}$:
+#         1. $a'_{s'} \leftarrow d(s'; \boldsymbol{w}_n)$
+#         2. $y_{s,a} \leftarrow r + \gamma q(s', a'_{s'}; \boldsymbol{\theta}_n)$
+#         3. $\mathcal{D}_q \leftarrow \mathcal{D}_q \cup \{((s,a), y_{s,a})\}$
+#     3. $\boldsymbol{\theta}_{n+1} \leftarrow \texttt{fit}(\mathcal{D}_q)$
+#     4. $\boldsymbol{w}_{n+1} \leftarrow \texttt{minimize}_{\boldsymbol{w}} -\frac{1}{|\mathcal{B}|} \sum_{(s,a,r,s') \in \mathcal{B}} q(s, d(s; \boldsymbol{w}); \boldsymbol{\theta}_{n+1})$
+# 3. **return** $\boldsymbol{\theta}_n$, $\boldsymbol{w}_n$
 # %%
 import numpy as np
-from scipy.io import loadmat
-from scipy.stats import multivariate_normal
-from scipy.spatial import ConvexHull
+import pickle as pkl
+from matplotlib import pyplot as plt
 import os
-import warnings
-import matlab.engine
+# %%
 
-# Local imports
-from sample_price_day import sample_price_day
-from sample_price_intraday import sample_price_intraday
-from VRx_weights_pk import VRx_weights
-from badp_weights_r import badp_weights
+# load src/BADP_w-TBPO/Data/offline_dataset_authors_data.pkl
+path = 'Results/offline_dataset.pkl'
+with open(path, 'rb') as f:
+    data = pkl.load(f)
+    
 
-# Helper Functions
-from helper import (
-    generate_scenarios,
-    compute_weights,
-    build_and_solve_intlinprog,
-    linear_constraints_train,
-)
+# %%
 
-warnings.filterwarnings("ignore")
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# =====================
-# Parameters
-# =====================
-if False:  # Example if no arguments are given, just hardcode as in MATLAB
-    length_R = 5
-    N = 50
-    T = 3
-    M = 10
-    seed = 2
-    Season = "Summer"
+import jax
+import jax.numpy as jnp
+import optax
+import pickle as pkl
+import numpy as np
 
-N = 50
-M = 10
-T = 3
-Season = "Summer"
-length_R = 5
-seed = 2
-D = 7  # days in forecast
-Rmax = 100
-np.random.seed(seed)
+# Load offline dataset
+with open('Results/offline_dataset.pkl', 'rb') as f:
+    data = pkl.load(f)
 
-t_ramp_pump_up = 2 / 60
-t_ramp_pump_down = 2 / 60
-t_ramp_turbine_up = 2 / 60
-t_ramp_turbine_down = 2 / 60
+# Extract arrays from DataFrame: assumes data is a DataFrame with correct columns.
+states = np.stack(data['state'].values)
+actions = np.stack(data['action'].values)
+rewards = np.array(data['reward'].values)
+next_states = np.stack(data['next_state'].values)
 
-c_grid_fee = 5 / 4
-Delta_ti = 0.25
-Delta_td = 1.0
+# Convert to jax arrays
+states = jnp.array(states)
+actions = jnp.array(actions)
+rewards = jnp.array(rewards)
+next_states = jnp.array(next_states)
 
-Q_mult = 1.2
-Q_fix = 3
-Q_start_pump = 15
-Q_start_turbine = 15
+# Set hyperparams
+gamma = 0.99
+learning_rate = 1e-3
+num_iterations = 1000
+batch_size = 64
 
-beta_pump = 0.9
-beta_turbine = 0.9
+num_samples = states.shape[0]
+state_dim = states.shape[1]
+action_dim = actions.shape[1]
 
-x_max_pump = 10
-x_min_pump = 5
-x_max_turbine = 10
-x_min_turbine = 5
+# Define MLP functions for Q and policy
+def mlp(params, x):
+    # params = [(W1,b1), (W2,b2), ...]
+    for W,b in params[:-1]:
+        x = jnp.tanh(jnp.dot(x,W)+b)
+    W,b = params[-1]
+    return jnp.dot(x,W)+b
 
-R_vec = np.linspace(0, Rmax, length_R)
-x_vec = np.array([-x_max_turbine, 0, x_max_pump])
+def init_mlp(key, in_dim, out_dim, hidden_sizes=(64,64)):
+    params = []
+    k = key
+    dims = [in_dim] + list(hidden_sizes) + [out_dim]
+    for i in range(len(dims)-1):
+        k,subk = jax.random.split(k)
+        W = jax.random.normal(subk, (dims[i], dims[i+1]))*0.1
+        b = jnp.zeros((dims[i+1],))
+        params.append((W,b))
+    return params
 
-c_pump_up = t_ramp_pump_up / 2
-c_pump_down = t_ramp_pump_down / 2
-c_turbine_up = t_ramp_turbine_up / 2
-c_turbine_down = t_ramp_turbine_down / 2
+# Initialize Q-network and Policy-network
+key = jax.random.PRNGKey(0)
+q_params = init_mlp(key, state_dim+action_dim, 1)
+key, subkey = jax.random.split(key)
+policy_params = init_mlp(subkey, state_dim, action_dim)
 
-# =====================
-# Load data
-# =====================
-P_day_mat = loadmat(os.path.join("Data", f"P_day_{Season}.mat"))
-P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_{Season}.mat"))
+# Define forward functions
+def q_function(params, s, a):
+    sa = jnp.concatenate([s,a], axis=-1)
+    return mlp(params, sa)
 
-P_day_0 = P_day_mat["P_day_0"].flatten()
-P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
+def policy(params, s):
+    # For simplicity, a deterministic policy with tanh last layer to bound actions if needed
+    x = s
+    for W,b in params[:-1]:
+        x = jnp.tanh(jnp.dot(x,W)+b)
+    W,b = params[-1]
+    # For continuous action, maybe we want to scale output by a factor
+    a = jnp.dot(x,W)+b
+    return a
 
-# Start MATLAB engine
-eng = matlab.engine.start_matlab()
+# Optimizers
+q_opt = optax.adam(learning_rate)
+policy_opt = optax.adam(learning_rate)
+q_opt_state = q_opt.init(q_params)
+policy_opt_state = policy_opt.init(policy_params)
 
-def train_policy():
+@jax.jit
+def q_loss_fn(q_params, s, a, y):
+    q_pred = q_function(q_params, s, a).squeeze(-1)
+    return jnp.mean((q_pred - y)**2)
 
-    # weights_D_value_mat = eng.badp_weights(T)
-    # weights_D_value = np.array(weights_D_value_mat)
+@jax.jit
+def policy_loss_fn(policy_params, q_params, s):
+    a = policy(policy_params, s)
+    q_val = q_function(q_params, s, a)
+    return -jnp.mean(q_val)
 
-    weights_D_value = badp_weights(T)
+q_grad_fn = jax.grad(q_loss_fn)
+policy_grad_fn = jax.grad(policy_loss_fn)
 
-    intlinprog_options = eng.optimoptions("intlinprog", "display", "off")
+def sample_batch(batch_size):
+    idx = np.random.randint(0, num_samples, size=batch_size)
+    return (states[idx], actions[idx], rewards[idx], next_states[idx])
 
-# =====================
-# Backward pass
-# =====================
-    sample_P_day_all, sample_P_intraday_all, Wt_day_mat, Wt_intra_mat = generate_scenarios(
-        N, T, D, P_day_0, P_intraday_0, Season, seed=seed
-    )
+for iter in range(num_iterations):
+    # Compute target y_{s,a}
+    # First we need a'
+    a_prime = policy(policy_params, next_states)
+    q_next = q_function(q_params, next_states, a_prime).squeeze(-1)
+    y = rewards + gamma*q_next
 
-    P_day_state = sample_P_day_all.copy()
-    P_intra_state = sample_P_intraday_all.copy()
+    # We'll do Q fitting
+    # Sample batch
+    s_b, a_b, r_b, s_next_b = sample_batch(batch_size)
+    a_prime_b = policy(policy_params, s_next_b)
+    q_next_b = q_function(q_params, s_next_b, a_prime_b).squeeze(-1)
+    y_b = r_b + gamma*q_next_b
 
-    Vt = np.zeros((length_R, 3, N, T + 1))
-    #%%
+    q_g = q_grad_fn(q_params, s_b, a_b, y_b)
+    updates, q_opt_state = q_opt.update(q_g, q_opt_state, q_params)
+    q_params = optax.apply_updates(q_params, updates)
 
-    for t_i in range(T - 1, -1, -1):
-        P_day_sample = P_day_state[:, t_i, :].copy()
-        P_intraday_sample = P_intra_state[:, t_i, :].copy()
+    # Policy improvement step
+    p_g = policy_grad_fn(policy_params, q_params, s_b)
+    updates, policy_opt_state = policy_opt.update(p_g, policy_opt_state, policy_params)
+    policy_params = optax.apply_updates(policy_params, updates)
 
-        if t_i < T - 1:
-            P_day_sample_next = P_day_state[:, t_i + 1, :].reshape(N, D * 24)
-            P_intraday_sample_next = P_intra_state[:, t_i + 1, :].reshape(N, D * 24 * 4)
+    if iter % 100 == 0:
+        # Compute a loss for logging
+        loss_val = q_loss_fn(q_params, s_b, a_b, y_b)
+        pol_loss_val = policy_loss_fn(policy_params, q_params, s_b)
+        print(f"Iter {iter}, Q-loss: {loss_val:.4f}, Policy-loss: {pol_loss_val:.4f}")
 
-        for n in range(N):
-            P_day = P_day_sample[n, :].copy()
-            P_intraday = P_intraday_sample[n, :].copy()
+print("Training complete.")
 
-            mu_day, cor_day = sample_price_day(P_day, t_i, Season)
-            if t_i < T-1:
-                P_next_day = P_day_sample_next[n, :].copy()
-                P_next_day = P_next_day[:24]
-            else:
-                P_next_day = mu_day
-            mu_intraday, cor_intraday = sample_price_intraday(
-                np.concatenate([P_next_day, P_day]), P_intraday, t_i, Season
-            )
+# save q_params and policy_params
+with open('Results/q_params.pkl', 'wb') as f:
+    pkl.dump(q_params, f)
+    
+with open('Results/policy_params.pkl', 'wb') as f:
+    pkl.dump(policy_params, f)
+    
 
-            P_day_next = np.concatenate([mu_day, P_day[:-24]])
-            P_intraday_next = np.concatenate([mu_intraday, P_intraday[:-96]])
+# q_params and policy_params now represent the learned Q and policy.
 
-            lk = 2
-            VR_abc_neg = np.zeros((lk - 1, 3))
-            VR_abc_pos = np.zeros((lk - 1, 3))
-
-            if t_i < T - 1:
-                phi = np.concatenate([P_day_sample_next, P_intraday_sample_next], axis=1)
-                Y = np.concatenate([P_day_next, P_intraday_next])
-                # phi = np.concatenate([P_day_sample_next[:24], P_intraday_sample_next[:24]], axis=1)
-                # Y = np.concatenate([mu_day, mu_intraday])
-                weights = VRx_weights(phi, Y, weights_D_value[int(t_i + 1), :])
-
-                VRx = np.zeros((length_R, 3))
-                for i in range(length_R):
-                    for j in range(3):
-                        VRx[i, j] = Vt[i, j, :, t_i + 1].dot(weights)
-
-                hull_input = np.column_stack([R_vec.T, VRx[:, 1]])
-                hull = ConvexHull(hull_input)
-                k = hull.vertices
-                k = np.sort(k)[::-1]
-                lk = len(k)
-
-                VR = VRx[k, :]
-                R_k = R_vec[k]
-                if lk > 1:
-                    VR_abc_neg = np.zeros((lk - 1, 3))
-                    VR_abc_pos = np.zeros((lk - 1, 3))
-                    for i in range(1, lk):
-                        VR_abc_neg[i - 1, 1] = (VR[i, 1] - VR[i - 1, 1]) / (
-                            R_k[i] - R_k[i - 1]
-                        )
-                        VR_abc_neg[i - 1, 0] = VR[i, 1] - VR_abc_neg[i - 1, 1] * R_k[i]
-                        VR_abc_neg[i - 1, 2] = -(VR[i - 1, 1] - VR[i - 1, 0]) / (
-                            x_vec[1] - x_vec[0]
-                        )
-
-                    for i in range(1, lk):
-                        VR_abc_pos[i - 1, 1] = (VR[i, 1] - VR[i - 1, 1]) / (
-                            R_k[i] - R_k[i - 1]
-                        )
-                        VR_abc_pos[i - 1, 0] = VR[i, 1] - VR_abc_pos[i - 1, 1] * R_k[i]
-                        VR_abc_pos[i - 1, 2] = (VR[i - 1, 1] - VR[i - 1, 2]) / (
-                            x_vec[1] - x_vec[2]
-                        )
-                else:
-                    VR_abc_neg = np.zeros((0, 3))
-                    VR_abc_pos = np.zeros((0, 3))
-
-            # Solve MILP for each state (R, x0)
-            for iR in range(length_R):
-                R_val = R_vec[iR]
-                for ix in range(len(x_vec)):
-                    x0 = x_vec[ix]
-
-                    # Build f
-                    f = np.zeros(96 * 12 + 24 + 1)
-                    f[-1] = 1
-                    # As per code:
-                    f[96:192] -= Delta_ti * mu_intraday
-                    f[-25:-1] = -Delta_td * mu_day
-                    q_pump_up = (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_pump_up / 2
-                    q_pump_down = (abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_pump_down / 2
-                    q_turbine_up = (
-                        (abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_turbine_up / 2
-                    )
-                    q_turbine_down = (
-                        (abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_turbine_down / 2
-                    )
-                    f[96 * 2 : 96 * 3] -= c_grid_fee
-                    f[96 * 4 : 96 * 5] += q_pump_up
-                    f[96 * 5 : 96 * 6] -= q_pump_down
-                    f[96 * 6 : 96 * 7] -= q_turbine_up
-                    f[96 * 7 : 96 * 8] += q_turbine_down
-                    f[96 * 10 : 96 * 11] -= Q_start_pump
-                    f[96 * 11 : 96 * 12] -= Q_start_turbine
-
-                    A, b, Aeq, beq, lb, ub = linear_constraints_train(
-                        Delta_ti,
-                        beta_pump,
-                        beta_turbine,
-                        c_pump_up,
-                        c_pump_down,
-                        c_turbine_up,
-                        c_turbine_down,
-                        R_val,
-                        x0,
-                        x_min_pump,
-                        x_max_pump,
-                        x_min_turbine,
-                        x_max_turbine,
-                        Rmax,
-                        lk,
-                        VR_abc_neg,
-                        VR_abc_pos,
-                    )
-
-                    intcon = np.arange(8 * 96, 96 * 10)
-                    
-                    x_opt, fval = build_and_solve_intlinprog(eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options)
-
-                    Vt[iR, ix, n, t_i] = -fval
-                    
-    return Vt, P_day_state, P_intra_state
-
-Vt, P_day_state, P_intra_state = train_policy()
-
-# Save Vt, P_day_state, P_intra_state in
-np.save("Results/Vt.npy", Vt)
-np.save("Results/P_day_state.npy", P_day_state)
-np.save("Results/P_intra_state.npy", P_intra_state)
+# %%
