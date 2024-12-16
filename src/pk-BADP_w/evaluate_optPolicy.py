@@ -1,5 +1,6 @@
 # %%
 import numpy as np
+import pandas as pd
 from scipy.io import loadmat
 from scipy.stats import multivariate_normal
 from scipy.spatial import ConvexHull
@@ -36,8 +37,8 @@ if False:  # Example if no arguments are given, just hardcode as in MATLAB
     Season = "Summer"
 
 N = 50
-M = 10
-T = 3
+M = 50
+T = 30
 Season = "Summer"
 length_R = 5
 seed = 2
@@ -114,6 +115,16 @@ y_turbine_path = np.zeros((M, 96 * T))
 z_pump_path = np.zeros((M, 96 * T))
 z_turbine_path = np.zeros((M, 96 * T))
 
+da_s = []
+da_a = []
+da_r = []
+da_s_prime = []
+
+id_s = []
+id_a = []
+id_r = []
+id_s_prime = []
+
 for m in range(M):
     R = R_0
     x0 = x0_0
@@ -136,6 +147,10 @@ for m in range(M):
         lk = 2
         VR_abc_neg = np.zeros((lk - 1, 3))
         VR_abc_pos = np.zeros((lk - 1, 3))
+
+        da_state = np.concatenate([[R], [x0], P_day, P_intraday])
+
+        da_s.append(da_state)
 
         # If we have another stage ahead and Vt is not empty, we need to compute weights and slopes again
         if t_i < T - 1 and np.any(Vt != 0):
@@ -410,15 +425,23 @@ for m in range(M):
 
         xday_opt = x_opt[-25:-1].copy()
 
+        da_a.append(xday_opt)
+
         Wt_day = Wt_day_mat_fwd[m, t_i * 24 : (t_i + 1) * 24].copy()
         day_path = np.tile(Wt_day, (4, 1))
         P_day_path[m, t_i * 96 : (t_i + 1) * 96] = day_path.flatten()
+
+        da_r.append(-Delta_td*np.dot(Wt_day, xday_opt))
 
         mu_intraday, _ = sample_price_intraday(
             np.concatenate([Wt_day, P_day_sim]), P_intraday_sim, t_i, Season
         )
 
         P_day_next = np.concatenate([Wt_day, P_day[:-24].copy()])
+        da_next_state = np.concatenate([da_state, xday_opt, Wt_day])
+
+        da_s_prime.append(da_next_state)
+        id_s.append(da_next_state)
         P_intraday_next = np.concatenate([mu_intraday, P_intraday[:-96].copy()])
 
         # Now solve the second MILP (intraday) with xday_opt as bounds
@@ -539,6 +562,8 @@ for m in range(M):
             eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options
         )
 
+        id_a.append(x_opt2)
+
         # Extract results from x_opt2
         R_opt = x_opt2[:96].copy()
         xhq_opt = x_opt2[96 : 2 * 96].copy()
@@ -584,6 +609,15 @@ for m in range(M):
         P_day_sim = np.concatenate([Wt_day, P_day_sim[:-24].copy()])
         P_intraday_sim = np.concatenate([Wt_intraday, P_intraday_sim[:-96].copy()])
 
+        id_r.append(- np.sum(x_pump)*c_grid_fee \
+            - Delta_ti*np.dot(Wt_intraday, xhq_opt) \
+            + np.dot(q_pump_up, Delta_pump_up) - np.dot(q_pump_down, Delta_pump_down) \
+            - np.dot(q_turbine_up, Delta_turbine_up) + np.dot(q_turbine_down, Delta_turbine_down) \
+            - np.sum(z_pump)*Q_start_pump - np.sum(z_turbine)*Q_start_turbine)
+
+        next_state = np.concatenate([[R], [x0], P_day, P_intraday])
+        id_s_prime.append(next_state)
+
         # Update C
         C = (
             C
@@ -602,3 +636,24 @@ for m in range(M):
 
 EV = np.mean(V)
 print(EV)
+
+#%%
+df_da = pd.DataFrame({
+    'state': da_s,
+    'action': da_a,
+    'reward': da_r,
+    'next_state': da_s_prime
+})
+
+# Save DataFrame to a pickle file
+df_da.to_pickle("offline_dataset_day_ahead.pkl")
+
+df_id = pd.DataFrame({
+    'state': id_s,
+    'action': id_a,
+    'reward': id_r,
+    'next_state': id_s_prime
+})
+
+# Save DataFrame to a pickle file
+df_id.to_pickle("offline_dataset_intraday.pkl")
