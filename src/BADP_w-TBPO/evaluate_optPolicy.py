@@ -104,10 +104,15 @@ def evaluate_policy():
     # r = C
     # s' = [x_end, R_end, P_day_next, P_intraday_next] 2 + 7*24 + 7*96
 
-    s_offline = []
-    a_offline = []
-    r_offline = []
-    s_prime_offline = []
+    DA_s_offline = []
+    DA_a_offline = []
+    DA_r_offline = []
+    DA_s_prime_offline = []
+    
+    ID_s_offline = []
+    ID_a_offline = []
+    ID_r_offline = []
+    ID_s_prime_offline = []
 
     weights_D_value = badp_weights(T)
 
@@ -120,6 +125,7 @@ def evaluate_policy():
         Wt_day_mat_fwd,
         Wt_intra_mat_fwd,
     ) = generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed + 1)
+    
 
     R_0 = 0
     x0_0 = 0
@@ -447,6 +453,13 @@ def evaluate_policy():
 
             P_day_next = np.concatenate([Wt_day, P_day[:-24].copy()])
             P_intraday_next = np.concatenate([mu_intraday, P_intraday[:-96].copy()])
+            
+            
+            
+            
+            
+            
+            
 
             # Now solve the second MILP (intraday) with xday_opt as bounds
             # Build f again for intraday stage
