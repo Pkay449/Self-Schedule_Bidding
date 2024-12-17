@@ -19,7 +19,11 @@
 import numpy as np
 import pickle as pkl
 from matplotlib import pyplot as plt
+
 import os
+import warnings
+warnings.filterwarnings("ignore")
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # %%
 
@@ -48,6 +52,46 @@ from flax import linen as nn
 from functools import partial
 import numpy as np
 import pickle
+
+# ------------------------
+# Parameters
+# ------------------------
+Season = "Summer"
+length_R = 5
+seed = 2
+D = 7  # days in forecast
+Rmax = 100
+np.random.seed(seed)
+
+t_ramp_pump_up = 2 / 60
+t_ramp_pump_down = 2 / 60
+t_ramp_turbine_up = 2 / 60
+t_ramp_turbine_down = 2 / 60
+
+c_grid_fee = 5 / 4
+Delta_ti = 0.25
+Delta_td = 1.0
+
+Q_mult = 1.2
+Q_fix = 3
+Q_start_pump = 15
+Q_start_turbine = 15
+
+beta_pump = 0.9
+beta_turbine = 0.9
+
+x_max_pump = 10
+x_min_pump = 5
+x_max_turbine = 10
+x_min_turbine = 5
+
+R_vec = np.linspace(0, Rmax, length_R)
+x_vec = np.array([-x_max_turbine, 0, x_max_pump])
+
+c_pump_up = t_ramp_pump_up / 2
+c_pump_down = t_ramp_pump_down / 2
+c_turbine_up = t_ramp_turbine_up / 2
+c_turbine_down = t_ramp_turbine_down / 2
 
 
 # ------------------------

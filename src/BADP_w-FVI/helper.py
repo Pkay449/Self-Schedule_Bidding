@@ -333,7 +333,7 @@ def linear_constraints_train_FVI(
     # A2
     Axh = np.zeros((96, 24))
     for h in range(24):
-        Axh[h * 4:(h + 1) * 4, h] = -1
+        Axh[h * 4 : (h + 1) * 4, h] = -1
 
     A2 = np.hstack(
         [
@@ -350,12 +350,12 @@ def linear_constraints_train_FVI(
 
     A3 = np.hstack(
         [
-            np.zeros((96, 96*2)),
+            np.zeros((96, 96 * 2)),
             np.eye(96) - np.diag(np.ones(95), -1),
             np.zeros((96, 96)),
             -np.eye(96),
             np.eye(96),
-            np.zeros((96, 96*6 + 24)),
+            np.zeros((96, 96 * 6 + 24)),
             np.zeros((96, 1)),
         ]
     )
@@ -364,12 +364,12 @@ def linear_constraints_train_FVI(
 
     A4 = np.hstack(
         [
-            np.zeros((96, 96*3)),
+            np.zeros((96, 96 * 3)),
             np.eye(96) - np.diag(np.ones(95), -1),
-            np.zeros((96, 96*2)),
+            np.zeros((96, 96 * 2)),
             -np.eye(96),
             np.eye(96),
-            np.zeros((96, 96*4 + 24)),
+            np.zeros((96, 96 * 4 + 24)),
             np.zeros((96, 1)),
         ]
     )
@@ -384,56 +384,56 @@ def linear_constraints_train_FVI(
         [
             np.hstack(
                 [
-                    np.zeros((96, 96*2)),
+                    np.zeros((96, 96 * 2)),
                     -np.eye(96),
-                    np.zeros((96, 96*5)),
+                    np.zeros((96, 96 * 5)),
                     x_min_pump * np.eye(96),
-                    np.zeros((96, 96*3+24)),
+                    np.zeros((96, 96 * 3 + 24)),
                     np.zeros((96, 1)),
                 ]
             ),
             np.hstack(
                 [
-                    np.zeros((96, 96*2)),
+                    np.zeros((96, 96 * 2)),
                     np.eye(96),
-                    np.zeros((96, 96*5)),
+                    np.zeros((96, 96 * 5)),
                     -x_max_pump * np.eye(96),
-                    np.zeros((96, 96*3+24)),
+                    np.zeros((96, 96 * 3 + 24)),
                     np.zeros((96, 1)),
                 ]
             ),
             np.hstack(
                 [
-                    np.zeros((96, 96*3)),
+                    np.zeros((96, 96 * 3)),
                     -np.eye(96),
-                    np.zeros((96, 96*5)),
+                    np.zeros((96, 96 * 5)),
                     x_min_turbine * np.eye(96),
-                    np.zeros((96, 96*2+24)),
+                    np.zeros((96, 96 * 2 + 24)),
                     np.zeros((96, 1)),
                 ]
             ),
             np.hstack(
                 [
-                    np.zeros((96, 96*3)),
+                    np.zeros((96, 96 * 3)),
                     np.eye(96),
-                    np.zeros((96, 96*5)),
+                    np.zeros((96, 96 * 5)),
                     -x_max_turbine * np.eye(96),
-                    np.zeros((96, 96*2+24)),
+                    np.zeros((96, 96 * 2 + 24)),
                     np.zeros((96, 1)),
                 ]
             ),
         ]
     )
-    b1 = np.zeros(96*4)
+    b1 = np.zeros(96 * 4)
 
     # Additional constraints if needed:
     A2 = np.hstack(
         [
-            np.zeros((96, 96*8)),
+            np.zeros((96, 96 * 8)),
             np.eye(96) - np.diag(np.ones(95), -1),
             np.zeros((96, 96)),
             -np.eye(96),
-            np.zeros((96, 96+24)),
+            np.zeros((96, 96 + 24)),
             np.zeros((96, 1)),
         ]
     )
@@ -442,12 +442,12 @@ def linear_constraints_train_FVI(
 
     A3 = np.hstack(
         [
-            np.zeros((96, 96*9)),
-            np.eye(96)-np.diag(np.ones(95),-1),
-            np.zeros((96,96)),
+            np.zeros((96, 96 * 9)),
+            np.eye(96) - np.diag(np.ones(95), -1),
+            np.zeros((96, 96)),
             -np.eye(96),
-            np.zeros((96,24)),
-            np.zeros((96,1))
+            np.zeros((96, 24)),
+            np.zeros((96, 1)),
         ]
     )
     b3 = np.zeros(96)
@@ -455,11 +455,11 @@ def linear_constraints_train_FVI(
 
     A4 = np.hstack(
         [
-            np.zeros((96,96*8)),
+            np.zeros((96, 96 * 8)),
             np.eye(96),
             np.eye(96),
-            np.zeros((96,2*96+24)),
-            np.zeros((96,1))
+            np.zeros((96, 2 * 96 + 24)),
+            np.zeros((96, 1)),
         ]
     )
     b4 = np.ones(96)
@@ -474,7 +474,7 @@ def linear_constraints_train_FVI(
         [
             np.zeros(96),
             -np.inf * np.ones(96),
-            np.zeros(96*10),
+            np.zeros(96 * 10),
             -x_max_turbine * np.ones(24),
             np.full(1, -np.inf),
         ]
@@ -482,8 +482,8 @@ def linear_constraints_train_FVI(
     ub = np.concatenate(
         [
             Rmax * np.ones(96),
-            np.inf * np.ones(96*7),
-            np.ones(96*4),
+            np.inf * np.ones(96 * 7),
+            np.ones(96 * 4),
             x_max_pump * np.ones(24),
             np.full(1, np.inf),
         ]
