@@ -425,23 +425,15 @@ for m in range(M):
 
         xday_opt = x_opt[-25:-1].copy()
 
-        da_a.append(xday_opt)
-
         Wt_day = Wt_day_mat_fwd[m, t_i * 24 : (t_i + 1) * 24].copy()
         day_path = np.tile(Wt_day, (4, 1))
         P_day_path[m, t_i * 96 : (t_i + 1) * 96] = day_path.flatten()
-
-        da_r.append(-Delta_td*np.dot(Wt_day, xday_opt))
 
         mu_intraday, _ = sample_price_intraday(
             np.concatenate([Wt_day, P_day_sim]), P_intraday_sim, t_i, Season
         )
 
         P_day_next = np.concatenate([Wt_day, P_day[:-24].copy()])
-        da_next_state = np.concatenate([da_state, xday_opt, Wt_day])
-
-        da_s_prime.append(da_next_state)
-        id_s.append(da_next_state)
         P_intraday_next = np.concatenate([mu_intraday, P_intraday[:-96].copy()])
 
         # Now solve the second MILP (intraday) with xday_opt as bounds
@@ -562,7 +554,7 @@ for m in range(M):
             eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options
         )
 
-        id_a.append(x_opt2)
+        da_a.append(np.concatenate([xday_opt, x_opt2]))
 
         # Extract results from x_opt2
         R_opt = x_opt2[:96].copy()
@@ -609,19 +601,7 @@ for m in range(M):
         P_day_sim = np.concatenate([Wt_day, P_day_sim[:-24].copy()])
         P_intraday_sim = np.concatenate([Wt_intraday, P_intraday_sim[:-96].copy()])
 
-        id_r.append(- np.sum(x_pump)*c_grid_fee \
-            - Delta_ti*np.dot(Wt_intraday, xhq_opt) \
-            + np.dot(q_pump_up, Delta_pump_up) - np.dot(q_pump_down, Delta_pump_down) \
-            - np.dot(q_turbine_up, Delta_turbine_up) + np.dot(q_turbine_down, Delta_turbine_down) \
-            - np.sum(z_pump)*Q_start_pump - np.sum(z_turbine)*Q_start_turbine)
-
-        next_state = np.concatenate([[R], [x0], P_day, P_intraday])
-        id_s_prime.append(next_state)
-
-        # Update C
-        C = (
-            C
-            - Delta_td * np.dot(Wt_day, xday_opt)
+        reward = (- Delta_td * np.dot(Wt_day, xday_opt)
             - np.sum(x_pump) * c_grid_fee
             - Delta_ti * np.dot(Wt_intraday, xhq_opt)
             + np.dot(q_pump_up, Delta_pump_up)
@@ -629,8 +609,15 @@ for m in range(M):
             - np.dot(q_turbine_up, Delta_turbine_up)
             + np.dot(q_turbine_down, Delta_turbine_down)
             - np.sum(z_pump) * Q_start_pump
-            - np.sum(z_turbine) * Q_start_turbine
-        )
+            - np.sum(z_turbine) * Q_start_turbine)
+
+        da_r.append(reward)
+
+        next_state = np.concatenate([[R], [x0], P_day, P_intraday])
+        da_s_prime.append(next_state)
+
+        # Update C
+        C = C + reward
 
     V[m] = C
 
@@ -646,14 +633,20 @@ df_da = pd.DataFrame({
 })
 
 # Save DataFrame to a pickle file
-df_da.to_pickle("offline_dataset_day_ahead.pkl")
+df_da.to_pickle("offline_dataset.pkl")
 
-df_id = pd.DataFrame({
-    'state': id_s,
-    'action': id_a,
-    'reward': id_r,
-    'next_state': id_s_prime
-})
+# Convert the DataFrame to a NumPy object array (if the data types are mixed or complex)
+df_array = df_da.to_numpy()
 
-# Save DataFrame to a pickle file
-df_id.to_pickle("offline_dataset_intraday.pkl")
+# Save the array to an .npy file
+np.save("offline_dataset.npy", df_array)
+
+# df_id = pd.DataFrame({
+#     'state': id_s,
+#     'action': id_a,
+#     'reward': id_r,
+#     'next_state': id_s_prime
+# })
+
+# # Save DataFrame to a pickle file
+# df_id.to_pickle("offline_dataset_intraday.pkl")

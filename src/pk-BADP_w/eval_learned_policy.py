@@ -1,13 +1,15 @@
+#%%
 import numpy as np
 from scipy.stats import multivariate_normal
 import os
 from scipy.io import loadmat
-
+import pickle
 # Local imports
 from sample_price_day import sample_price_day
 from sample_price_intraday import sample_price_intraday
+import jax.numpy as jnp
 
-
+#%%
 M=50
 T=30
 D=7
@@ -63,6 +65,29 @@ def generate_scenarios(N, T, D, P_day_0, P_intraday_0, Season, seed=None):
 
 sample_P_day_all_fwd, sample_P_intraday_all_fwd, Wt_day_mat_fwd, Wt_intra_mat_fwd = generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed)
 
+#%%
+with open(r"model_2048_1000_iter_local.pkl", "rb") as input_file:
+    e = pickle.load(input_file)
+# e = np.load("src/pk-BADP_w/model_2048_1000_iter_local.npy", allow_pickle=True).item()
+pq = e["params_q"]
+ppol = e["params_policy"]
+def relu(x):
+    return jnp.maximum(0, x)
+
+def q_network(params, state_action):
+    activations = state_action
+    for W, b in params[:-1]:
+        activations = relu(jnp.dot(activations, W) + b)
+    final_W, final_b = params[-1]
+    return jnp.dot(activations, final_W) + final_b  # Output scalar Q-value
+
+def policy_network(params, state):
+    activations = state
+    for W, b in params[:-1]:
+        activations = relu(jnp.dot(activations, W) + b)
+    final_W, final_b = params[-1]
+    return jnp.dot(activations, final_W) + final_b  # Output action
+
 R_0=0
 x0_0=0
 V = np.zeros((M,1))
@@ -107,13 +132,15 @@ for m in range(M):
         Wt_day=Wt_day_mat_fwd[m,t_i*24:(t_i+1)*24].copy()
 
         # Get day ahead action from corresponding policy model
-        xday_opt = da_model.predict(da_state)
+        x_opt = policy_network(ppol, da_state)
+        xday_opt = x_opt[:24]
+        x_opt2 = x_opt[24:]
 
-        # Get initial state for intraday
-        id_state = np.concatenate([da_state, xday_opt, Wt_day])
+        # # Get initial state for intraday
+        # id_state = np.concatenate([da_state, xday_opt, Wt_day])
 
-        # Get intraday action from corresponding policy model
-        x_opt2 = intraday_model.predict(id_state)
+        # # Get intraday action from corresponding policy model
+        # x_opt2 = intraday_model.predict(id_state)
 
         # Extract results from x_opt2
         R_opt = x_opt2[:96].copy()
