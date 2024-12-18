@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from flax import linen as nn
-from jaxopt import OSQP
+from jaxopt import OSQP, CvxpyQP
 from matplotlib import pyplot as plt
 
 import helper as h_
@@ -160,7 +160,10 @@ class PolicyNetworkDA(nn.Module):
 
     @nn.compact
     def __call__(
-        self, state: jnp.ndarray, ub: jnp.ndarray, lb: jnp.ndarray
+        self, 
+        state: jnp.ndarray, 
+        ub: jnp.ndarray, 
+        lb: jnp.ndarray
     ) -> jnp.ndarray:
         x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
@@ -191,7 +194,8 @@ class PolicyNetworkID(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
-        raw_actions = nn.Dense(self.action_dim)(x)
+        raw_actions = nn.Dense(self.action_dim)(x)  # shape: (1, action_dim)
+        raw_actions = jnp.squeeze(raw_actions, axis=0)  # shape: (action_dim,)
 
         # Combine constraints
         # Aeq_all, beq_all = combine_constraints(Aeq, beq, equality=True)
@@ -261,15 +265,16 @@ def solve_qp(
         h_total = h_bounds
     
     # Debug prints
-    print("P:", P)
-    print("q:", q)
-    print("A_eq:", A_eq)
-    print("b_eq:", b_eq)
-    print("G_total:", G_total)
-    print("h_total:", h_total)
+    # print("P:", P)
+    # print("q:", q)
+    # print("A_eq:", A_eq)
+    # print("b_eq:", b_eq)
+    # print("G_total:", G_total)
+    # print("h_total:", h_total)
     
     # Initialize the solver
-    solver = OSQP()
+    # solver = OSQP()
+    solver = CvxpyQP()
     
     # Run the solver
     solution = solver.run(
@@ -429,12 +434,7 @@ def update_policy_da(
 ) -> Tuple[Any, Any]:
     # Deterministic policy gradient: maximize Q(s, pi(s))
     def loss_fn(params):
-        a_da = policy_da_model.apply(
-            params,
-            s_da,
-            jnp.ones(action_dim_da) * config.x_max_pump,  # 1-D array
-            jnp.zeros(action_dim_da),  # 1-D array
-        )
+        a_da = get_da_actions(params, q_da_model, s_da, config)
         q_values = q_da_model.apply(q_da_params, s_da, a_da)
         return -jnp.mean(q_values)
 
@@ -455,16 +455,7 @@ def update_policy_id(
 ) -> Tuple[Any, Any]:
     # Deterministic policy gradient: maximize Q(s, pi(s))
     def loss_fn(params):
-        a_id = policy_id_model.apply(
-            params,
-            s_id,
-            [],  # Aeq
-            [],  # beq
-            [],  # A
-            [],  # b
-            jnp.ones(action_dim_id) * config.x_max_pump,  # 1-D array
-            jnp.zeros(action_dim_id),  # 1-D array
-        )
+        a_id = get_id_actions(params, q_id_model, s_id, config)
         q_values = q_id_model.apply(q_id_params, s_id, a_id)
         return -jnp.mean(q_values)
 
