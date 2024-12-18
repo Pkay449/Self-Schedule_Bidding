@@ -211,20 +211,20 @@ def train_policy():
                     f[96 * 11 : 96 * 12] -= Q_start_turbine
 
                     A, b, Aeq, beq, lb, ub = linear_constraints_train(
-                        Delta_ti,
-                        beta_pump,
-                        beta_turbine,
-                        c_pump_up,
-                        c_pump_down,
-                        c_turbine_up,
-                        c_turbine_down,
-                        R_val,
-                        x0,
-                        x_min_pump,
-                        x_max_pump,
-                        x_min_turbine,
-                        x_max_turbine,
-                        Rmax,
+                        Delta_ti, # constant
+                        beta_pump, # constant
+                        beta_turbine, # constant
+                        c_pump_up, # constant
+                        c_pump_down, # constant
+                        c_turbine_up, # constant
+                        c_turbine_down, # constant
+                        R_val, # state[0]
+                        x0,# state[1]
+                        x_min_pump, # constant
+                        x_max_pump, # constant
+                        x_min_turbine, # constant
+                        x_max_turbine, # constant
+                        Rmax, # constant
                         lk,
                         VR_abc_neg,
                         VR_abc_pos,

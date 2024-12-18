@@ -563,8 +563,10 @@ def evaluate_optPolicy_2series():
             x_opt2, fval2 = build_and_solve_intlinprog(
                 eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options
             )
+            
+            action_id = x_opt2[:-25]
 
-            id_a.append(x_opt2)
+            id_a.append(action_id)
 
             # Extract results from x_opt2
             R_opt = x_opt2[:96].copy()

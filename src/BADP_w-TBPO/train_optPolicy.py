@@ -1,20 +1,3 @@
-# %%[markdown]
-# #### Neural Fitted Q-Iteration with Continuous Actions (NFQCA)
-
-# **Input** MDP $(S, A, P, R, \gamma)$, base points $\mathcal{B}$, Q-function $q(s,a; \boldsymbol{\theta})$, policy $d(s; \boldsymbol{w})$
-
-# **Output** Parameters $\boldsymbol{\theta}$ for Q-function, $\boldsymbol{w}$ for policy
-
-# 1. Initialize $\boldsymbol{\theta}_0$, $\boldsymbol{w}_0$
-# 2. **for** $n = 0,1,2,...$ **do**
-#     1. $\mathcal{D}_q \leftarrow \emptyset$
-#     2. For each $(s,a,r,s') \in \mathcal{B}$:
-#         1. $a'_{s'} \leftarrow d(s'; \boldsymbol{w}_n)$
-#         2. $y_{s,a} \leftarrow r + \gamma q(s', a'_{s'}; \boldsymbol{\theta}_n)$
-#         3. $\mathcal{D}_q \leftarrow \mathcal{D}_q \cup \{((s,a), y_{s,a})\}$
-#     3. $\boldsymbol{\theta}_{n+1} \leftarrow \texttt{fit}(\mathcal{D}_q)$
-#     4. $\boldsymbol{w}_{n+1} \leftarrow \texttt{minimize}_{\boldsymbol{w}} -\frac{1}{|\mathcal{B}|} \sum_{(s,a,r,s') \in \mathcal{B}} q(s, d(s; \boldsymbol{w}); \boldsymbol{\theta}_{n+1})$
-# 3. **return** $\boldsymbol{\theta}_n$, $\boldsymbol{w}_n$
 # %%
 import numpy as np
 import pickle as pkl
@@ -22,6 +5,7 @@ from matplotlib import pyplot as plt
 
 import os
 import warnings
+
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -48,10 +32,16 @@ for key in id_df.keys():
 import jax
 import jax.numpy as jnp
 import optax
+import jax
+import jax.numpy as jnp
+from flax import linen as nn
+from jaxopt import OSQP
 from flax import linen as nn
 from functools import partial
 import numpy as np
 import pickle
+
+import helper as h_
 
 # ------------------------
 # Parameters
@@ -170,13 +160,16 @@ class PolicyDA(nn.Module):
     hidden_dim: int = 256
 
     @nn.compact
-    def __call__(self, state):
+    def __call__(self, state, ub, lb):
         x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
         # Output a vector of action_dim floats (continuous actions)
         actions = nn.Dense(self.action_dim)(x)
+
+        actions = lb + (ub - lb) * nn.sigmoid(actions)
+
         return actions
 
 
@@ -186,56 +179,101 @@ class PolicyID(nn.Module):
     hidden_dim: int = 256
 
     @nn.compact
-    def __call__(self, state):
+    def __call__(self, state, Aeq, beq, A, b, ub, lb):
+        """
+        Returns a vector of actions which satisfy the constraints
+
+        Args:
+            Aeq (List[np.ndarray]): List of matrices for equality constraints (Aeq_i).
+            beq (List[np.ndarray]): List of vectors for equality constraints (beq_i).
+            A (List[np.ndarray]): List of matrices for inequality constraints (A_i).
+            b (List[np.ndarray]): List of vectors for inequality constraints (b_i).
+            ub (np.ndarray): upper bound for actions (shape: (action_dim,))
+            lb (np.ndarray): lower bound for actions (shape: (action_dim,))
+
+        Returns:
+            np.ndarray: actions returned by policy
+        """
+        # Produce raw unconstrained actions
         x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
-        # Output a vector of action_dim floats (continuous actions)
-        actions = nn.Dense(self.action_dim)(x)
-        return actions
+        raw_actions = nn.Dense(self.action_dim)(x)
+
+        # Combine all equality constraints
+        # Each Aeq_i @ actions = beq_i
+        # Stack them vertically
+        if len(Aeq) > 0:
+            Aeq_all = jnp.vstack(Aeq)  # Shape: (sum_of_all_eq_rows, action_dim)
+            beq_all = jnp.concatenate(beq)  # Shape: (sum_of_all_eq_rows,)
+        else:
+            # No equality constraints
+            Aeq_all = jnp.zeros((0, self.action_dim))
+            beq_all = jnp.zeros((0,))
+
+        # Combine all inequality constraints
+        # Each A_i @ actions <= b_i
+        if len(A) > 0:
+            A_all = jnp.vstack(A)  # Shape: (sum_of_all_ineq_rows, action_dim)
+            b_all = jnp.concatenate(b)  # Shape: (sum_of_all_ineq_rows,)
+        else:
+            # No inequality constraints
+            A_all = jnp.zeros((0, self.action_dim))
+            b_all = jnp.zeros((0,))
+
+        # Now we need to form a QP of the form:
+        # minimize (1/2)*actions^T * I * actions - raw_actions^T * actions
+        # s.t. Aeq_all * actions = beq_all
+        #      A_all * actions <= b_all
+        #      lb <= actions <= ub
+
+        # Objective: Q = I, c = -raw_actions
+        Q = jnp.eye(self.action_dim)
+        c = -raw_actions
+
+        # Convert equality constraints to OSQP form:
+        # For equality: Aeq*x = beq can be represented as
+        # l_eq = u_eq = beq
+        A_eq_block = Aeq_all
+        l_eq_block = beq_all
+        u_eq_block = beq_all
+
+        # For inequality: A*x <= b, we have
+        # l_ineq = -∞, u_ineq = b
+        A_ineq_block = A_all
+        l_ineq_block = -jnp.inf * jnp.ones(A_all.shape[0])
+        u_ineq_block = b_all
+
+        # For bounds:
+        # lb <= actions <= ub
+        # This can be represented as:
+        # I * actions <= ub   and   (-I)*actions <= -lb
+        A_bounds_block = jnp.vstack(
+            [jnp.eye(self.action_dim), -jnp.eye(self.action_dim)]
+        )
+        l_bounds_block = jnp.concatenate(
+            [-jnp.inf * jnp.ones(self.action_dim), -jnp.inf * jnp.ones(self.action_dim)]
+        )
+        u_bounds_block = jnp.concatenate([ub, -lb])
+
+        # Combine all constraints:
+        A_all_blocks = jnp.vstack([A_eq_block, A_ineq_block, A_bounds_block])
+        l_all_blocks = jnp.concatenate([l_eq_block, l_ineq_block, l_bounds_block])
+        u_all_blocks = jnp.concatenate([u_eq_block, u_ineq_block, u_bounds_block])
+
+        # Create an OSQP solver instance
+        solver = OSQP()
+
+        P = Q  # rename Q to P
+        q = c  # rename c to q
+
+        solution = solver.run(P, q, A_all_blocks, l_all_blocks, u_all_blocks)
+        actions_feasible = solution.x
 
 
-# Initialize PRNGKeys
-key = jax.random.PRNGKey(0)
-da_key, id_key, pda_key, pid_key = jax.random.split(key, 4)
 
-# Dummy inputs for initialization (continuous actions)
-dummy_s_da = jnp.ones((1, 842))
-dummy_a_da = jnp.ones((1, 24), dtype=jnp.float32)
-dummy_s_id = jnp.ones((1, 890))
-dummy_a_id = jnp.ones((1, 1177), dtype=jnp.float32)
-
-q_da_model = QNetworkDA()
-q_id_model = QNetworkID()
-policy_da_model = PolicyDA()
-policy_id_model = PolicyID()
-
-q_da_params = q_da_model.init(da_key, dummy_s_da, dummy_a_da)
-q_id_params = q_id_model.init(id_key, dummy_s_id, dummy_a_id)
-policy_da_params = policy_da_model.init(pda_key, dummy_s_da)
-policy_id_params = policy_id_model.init(pid_key, dummy_s_id)
-
-q_da_target_params = q_da_params
-q_id_target_params = q_id_params
-
-learning_rate = 1e-3
-q_da_opt = optax.adam(learning_rate)
-q_id_opt = optax.adam(learning_rate)
-policy_da_opt = optax.adam(learning_rate)
-policy_id_opt = optax.adam(learning_rate)
-
-q_da_opt_state = q_da_opt.init(q_da_params)
-q_id_opt_state = q_id_opt.init(q_id_params)
-policy_da_opt_state = policy_da_opt.init(policy_da_params)
-policy_id_opt_state = policy_id_opt.init(policy_id_params)
-
-gamma = 0.99
-batch_size = 64
-num_epochs = 10
-
-da_data = load_offline_data_da("Results/offline_dataset_day_ahead.pkl")
-id_data = load_offline_data_id("Results/offline_dataset_intraday.pkl")
+        return actions_feasible
 
 
 def mse_loss(pred, target):
@@ -246,6 +284,51 @@ def soft_update(target_params, online_params, tau=0.005):
     return jax.tree_util.tree_map(
         lambda tp, op: tp * (1 - tau) + op * tau, target_params, online_params
     )
+
+
+def get_id_actions(
+    policy_id_params,
+    s_id,
+    Delta_ti,
+    beta_pump,
+    beta_turbine,
+    c_pump_up,
+    c_pump_down,
+    c_turbine_up,
+    c_turbine_down,
+    x_min_pump,
+    x_max_pump,
+    x_min_turbine,
+    x_max_turbine,
+    Rmax,
+):
+    # constraints
+    A, b, Aeq, beq, lb, ub = h_.build_constraints_ID(
+        s_id,
+        Delta_ti,
+        beta_pump,
+        beta_turbine,
+        c_pump_up,
+        c_pump_down,
+        c_turbine_up,
+        c_turbine_down,
+        x_min_pump,
+        x_max_pump,
+        x_min_turbine,
+        x_max_turbine,
+        Rmax,
+    )
+    # Apply the policy with constraints
+    actions = policy_id_model.apply(policy_id_params, s_id, Aeq, beq, A, b, ub, lb)
+    return actions
+
+
+def get_da_actions(policy_da_params, s_da, x_max_pump, x_max_turbine):
+    # constraints
+    lb, ub = h_.build_constraints_DA(x_max_pump, x_max_turbine)
+    # Apply the policy with constraints
+    actions = policy_da_model.apply(policy_da_params, s_da, ub, lb)
+    return actions
 
 
 @jax.jit
@@ -261,7 +344,8 @@ def update_q_id(
     s_da_next,
 ):
     # Q_ID target: R_t^{ID} + gamma * Q_DA(s_{t+1}^{DA}, policy_DA(s_{t+1}^{DA}))
-    next_da_actions = policy_da_model.apply(policy_da_params, s_da_next)
+    # next_da_actions = policy_da_model.apply(policy_da_params, s_da_next)
+    next_da_actions = get_da_actions(policy_da_params)
     q_da_values = q_da_model.apply(q_da_target_params, s_da_next, next_da_actions)
     q_target_id = r_id + gamma * q_da_values
 
@@ -288,7 +372,8 @@ def update_q_da(
     s_id_next,
 ):
     # Q_DA target: R_t^{DA} + gamma * Q_ID(s_{t}^{ID}, policy_ID(s_{t}^{ID}))
-    next_id_actions = policy_id_model.apply(policy_id_params, s_id_next)
+    # next_id_actions = policy_id_model.apply(policy_id_params, s_id_next)
+    next_id_actions = get_id_actions(policy_id_params, s_id_next)
     q_id_values = q_id_model.apply(q_id_target_params, s_id_next, next_id_actions)
     q_target_da = r_da + gamma * q_id_values
 
@@ -330,6 +415,73 @@ def update_policy_id(policy_id_params, policy_id_opt_state, q_id_params, s_id):
     updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
     policy_id_params_new = optax.apply_updates(policy_id_params, updates)
     return policy_id_params_new, policy_id_opt_state_new
+
+
+# =============================================================================
+
+# Initialize PRNGKeys
+key = jax.random.PRNGKey(0)
+da_key, id_key, pda_key, pid_key = jax.random.split(key, 4)
+
+# Dummy inputs for initialization (continuous actions)
+dummy_s_da = jnp.ones((1, 842))
+dummy_a_da = jnp.ones((1, 24), dtype=jnp.float32)
+dummy_s_id = jnp.ones((1, 890))
+dummy_a_id = jnp.ones((1, 1177), dtype=jnp.float32)
+
+q_da_model = QNetworkDA()
+q_id_model = QNetworkID()
+policy_da_model = PolicyDA()
+policy_id_model = PolicyID()
+
+q_da_params = q_da_model.init(da_key, dummy_s_da, dummy_a_da)
+q_id_params = q_id_model.init(id_key, dummy_s_id, dummy_a_id)
+# For DA Policy:
+dummy_ub_da = jnp.ones((24,), dtype=jnp.float32) * 10.0  # arbitrary upper bound
+dummy_lb_da = jnp.zeros((24,), dtype=jnp.float32)        # arbitrary lower bound
+policy_da_params = policy_da_model.init(pda_key, dummy_s_da, dummy_ub_da, dummy_lb_da)
+
+# Dummy constraints for ID policy initialization
+Aeq_dummy = []
+beq_dummy = []
+A_dummy = []
+b_dummy = []
+ub_dummy = jnp.ones((1177,), dtype=jnp.float32) * 10.0
+lb_dummy = jnp.zeros((1177,), dtype=jnp.float32)
+
+# Initialize PolicyID params with all required dummy arguments
+policy_id_params = policy_id_model.init(pid_key, dummy_s_id, Aeq_dummy, beq_dummy, A_dummy, b_dummy, ub_dummy, lb_dummy)
+
+
+q_da_target_params = q_da_params
+q_id_target_params = q_id_params
+
+learning_rate = 1e-3
+q_da_opt = optax.adam(learning_rate)
+q_id_opt = optax.adam(learning_rate)
+policy_da_opt = optax.adam(learning_rate)
+policy_id_opt = optax.adam(learning_rate)
+
+q_da_opt_state = q_da_opt.init(q_da_params)
+q_id_opt_state = q_id_opt.init(q_id_params)
+policy_da_opt_state = policy_da_opt.init(policy_da_params)# For ID Policy:
+# Let's say we have no constraints at initialization
+Aeq_dummy = []
+beq_dummy = []
+A_dummy = []
+b_dummy = []
+ub_dummy = jnp.ones((1177,), dtype=jnp.float32) * 10.0
+lb_dummy = jnp.zeros((1177,), dtype=jnp.float32)
+
+policy_id_params = policy_id_model.init(pid_key, dummy_s_id, Aeq_dummy, beq_dummy, A_dummy, b_dummy, ub_dummy, lb_dummy)
+policy_id_opt_state = policy_id_opt.init(policy_id_params)
+
+gamma = 0.99
+batch_size = 64
+num_epochs = 10
+
+da_data = load_offline_data_da("Results/offline_dataset_day_ahead.pkl")
+id_data = load_offline_data_id("Results/offline_dataset_intraday.pkl")
 
 
 # ------------------------
@@ -394,7 +546,8 @@ for epoch in range(num_epochs):
 # ------------------------
 def sample_action_da(policy_da_params, s_da_example):
     # now returns continuous action vector
-    actions = policy_da_model.apply(policy_da_params, s_da_example)
+    # actions = policy_da_model.apply(policy_da_params, s_da_example)
+    actions = get_da_actions(policy_da_params)
     return actions
 
 
