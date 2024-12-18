@@ -1,5 +1,4 @@
 # %%
-# %%
 import os
 import warnings
 import pickle
@@ -18,6 +17,7 @@ import helper as h_
 
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 
 # %%
 # ------------------------
@@ -71,14 +71,18 @@ class Config:
     c_turbine_up: float = t_ramp_turbine_up / 2
     c_turbine_down: float = t_ramp_turbine_down / 2
 
+
 config = Config()
 np.random.seed(config.seed)
+
 
 # %%
 # ------------------------
 # Data Loading
 # ------------------------
-def load_offline_data(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def load_offline_data(
+    path: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     with open(path, "rb") as f:
         df = pickle.load(f)
     states = np.stack(df["state"].values)
@@ -87,13 +91,17 @@ def load_offline_data(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np
     next_states = np.stack(df["next_state"].values)
     return states, actions, rewards, next_states
 
-def print_data_shapes(data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], data_type: str) -> None:
+
+def print_data_shapes(
+    data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], data_type: str
+) -> None:
     states, actions, rewards, next_states = data
     print(f"{data_type} data:")
-    print(f"{data_type} States Shape: {states.shape}")
-    print(f"{data_type} Actions Shape: {actions.shape}")
-    print(f"{data_type} Rewards Shape: {rewards.shape}")
-    print(f"{data_type} Next States Shape: {next_states.shape}")
+    print(f"  States Shape: {states.shape}")
+    print(f"  Actions Shape: {actions.shape}")
+    print(f"  Rewards Shape: {rewards.shape}")
+    print(f"  Next States Shape: {next_states.shape}")
+
 
 da_path = "Results/offline_dataset_day_ahead.pkl"
 id_path = "Results/offline_dataset_intraday.pkl"
@@ -106,6 +114,7 @@ id_data = load_offline_data(id_path)
 print_data_shapes(da_data, "Day Ahead")
 print_data_shapes(id_data, "Intraday")
 
+
 # %%
 # ------------------------
 # Batch Iterator
@@ -113,7 +122,7 @@ print_data_shapes(id_data, "Intraday")
 def batch_iter(
     data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     batch_size: int,
-    shuffle: bool = True
+    shuffle: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     states, actions, rewards, next_states = data
     N = len(states)
@@ -123,6 +132,7 @@ def batch_iter(
     for start in range(0, N, batch_size):
         idx = indices[start : start + batch_size]
         yield states[idx], actions[idx], rewards[idx], next_states[idx]
+
 
 # %%
 # ------------------------
@@ -142,19 +152,23 @@ class QNetwork(nn.Module):
         x = nn.relu(x)
         return nn.Dense(1)(x)
 
+
 class PolicyNetworkDA(nn.Module):
     state_dim: int
     action_dim: int
     hidden_dim: int = 256
 
     @nn.compact
-    def __call__(self, state: jnp.ndarray, ub: jnp.ndarray, lb: jnp.ndarray) -> jnp.ndarray:
+    def __call__(
+        self, state: jnp.ndarray, ub: jnp.ndarray, lb: jnp.ndarray
+    ) -> jnp.ndarray:
         x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
         actions = nn.Dense(self.action_dim)(x)
         return lb + (ub - lb) * nn.sigmoid(actions)
+
 
 class PolicyNetworkID(nn.Module):
     state_dim: int
@@ -165,12 +179,12 @@ class PolicyNetworkID(nn.Module):
     def __call__(
         self,
         state: jnp.ndarray,
-        Aeq: List[jnp.ndarray],
-        beq: List[jnp.ndarray],
-        A: List[jnp.ndarray],
-        b: List[jnp.ndarray],
+        Aeq: jnp.ndarray,
+        beq: jnp.ndarray,
+        A: jnp.ndarray,
+        b: jnp.ndarray,
         ub: jnp.ndarray,
-        lb: jnp.ndarray
+        lb: jnp.ndarray,
     ) -> jnp.ndarray:
         # Generate raw actions
         x = nn.Dense(self.hidden_dim)(state)
@@ -180,30 +194,28 @@ class PolicyNetworkID(nn.Module):
         raw_actions = nn.Dense(self.action_dim)(x)
 
         # Combine constraints
-        Aeq_all, beq_all = combine_constraints(Aeq, beq, equality=True)
-        A_all, b_all = combine_constraints(A, b, equality=False)
+        # Aeq_all, beq_all = combine_constraints(Aeq, beq, equality=True)
+        # A_all, b_all = combine_constraints(A, b, equality=False)
 
         # Define QP problem
         actions_feasible = solve_qp(
-            raw_actions,
-            Aeq_all,
-            beq_all,
-            A_all,
-            b_all,
-            ub,
-            lb,
-            self.action_dim
+            raw_actions, Aeq, beq, A, b, ub, lb
         )
         return actions_feasible
 
-def combine_constraints(A_constraints: List[jnp.ndarray], b_constraints: List[jnp.ndarray], equality: bool) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    if A_constraints:
-        A_combined = jnp.vstack(A_constraints)
-        b_combined = jnp.concatenate(b_constraints)
-    else:
-        A_combined = jnp.zeros((0, A_constraints[0].shape[-1] if A_constraints else 0))
-        b_combined = jnp.zeros((0,))
-    return A_combined, b_combined
+
+
+# def combine_constraints(
+#     A_constraints: List[jnp.ndarray], b_constraints: List[jnp.ndarray], equality: bool
+# ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#     if A_constraints:
+#         A_combined = jnp.vstack(A_constraints)
+#         b_combined = jnp.concatenate(b_constraints)
+#     else:
+#         A_combined = jnp.zeros((0, A_constraints[0].shape[-1] if A_constraints else 0))
+#         b_combined = jnp.zeros((0,))
+#     return A_combined, b_combined
+
 
 def solve_qp(
     raw_actions: jnp.ndarray,
@@ -213,46 +225,45 @@ def solve_qp(
     b: jnp.ndarray,
     ub: jnp.ndarray,
     lb: jnp.ndarray,
-    action_dim: int
 ) -> jnp.ndarray:
-    # Objective: minimize (1/2)*x^T x - raw_actions^T x
-    P = jnp.eye(action_dim)
-    q = -raw_actions
+    # Number of variables
+    n = raw_actions.shape[0]
 
-    # Equality constraints
-    if Aeq.shape[0] > 0:
-        A_eq = Aeq
-        l_eq = beq
-        u_eq = beq
-    else:
-        A_eq = jnp.zeros((0, action_dim))
-        l_eq = jnp.zeros((0,))
-        u_eq = jnp.zeros((0,))
-
-    # Inequality constraints
-    if A.shape[0] > 0:
-        A_ineq = A
-        l_ineq = -jnp.inf * jnp.ones(A.shape[0])
-        u_ineq = b
-    else:
-        A_ineq = jnp.zeros((0, action_dim))
-        l_ineq = jnp.zeros((0,))
-        u_ineq = jnp.zeros((0,))
-
-    # Bounds as linear constraints
-    A_bounds = jnp.vstack([jnp.eye(action_dim), -jnp.eye(action_dim)])
-    l_bounds = jnp.concatenate([lb, -ub])
-    u_bounds = jnp.concatenate([ub, -lb])
-
-    # Combine all constraints
-    A_total = jnp.vstack([A_eq, A_ineq, A_bounds])
-    l_total = jnp.concatenate([l_eq, l_ineq, l_bounds])
-    u_total = jnp.concatenate([u_eq, u_ineq, u_bounds])
-
+    # Q and c for the objective:
+    # Minimize 1/2 * ||x - raw_actions||^2
+    # = (1/2) x^T I x - raw_actions^T x + constant
+    Q = jnp.eye(n)
+    c = -raw_actions
+    
+    # Aeq x = beq : given
+    
+    # print shapes
+    # print("Shapes:")
+    # print("Q:", Q.shape)
+    # print("n:", n)
+    
+    # Gx <= h, we must convert x <= ub and x >= lb to Gx <= h
+    # G = [[-I], [I], A] and h = [-lb, ub, b]
+    G = jnp.vstack([-jnp.eye(n), jnp.eye(n), A])
+    h = jnp.concatenate([-lb, ub, b])
+    
+    # print shapes
+    # print("Shapes:")
+    # print("Q:", Q.shape)
+    # print("c:", c.shape)
+    # print("Aeq:", Aeq.shape)
+    # print("beq:", beq.shape)
+    # print("G:", G.shape)
+    # print("h:", h.shape)
+    
+    
     # Solve QP
     solver = OSQP()
-    solution = solver.run(P, q, A_total, l_total, u_total)
-    return solution.x
+    sol = solver.run(params_obj=(Q, c), params_eq=(Aeq, beq), params_ineq=(G, h)).params
+    return sol.x
+
+    
+
 
 # %%
 # ------------------------
@@ -261,20 +272,19 @@ def solve_qp(
 def mse_loss(pred: jnp.ndarray, target: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean((pred - target) ** 2)
 
+
 def soft_update(target_params: Any, online_params: Any, tau: float = 0.005) -> Any:
     return jax.tree_util.tree_map(
         lambda tp, op: tp * (1 - tau) + op * tau, target_params, online_params
     )
+
 
 # %%
 # ------------------------
 # Action Retrieval Functions
 # ------------------------
 def get_id_actions(
-    policy_id_params: Any,
-    policy_id_model: nn.Module,
-    s_id: jnp.ndarray,
-    config: Config
+    policy_id_params: Any, policy_id_model: nn.Module, s_id: jnp.ndarray, config: Config
 ) -> jnp.ndarray:
     # Build constraints
     A, b, Aeq, beq, lb, ub = h_.build_constraints_ID(
@@ -292,21 +302,29 @@ def get_id_actions(
         config.x_max_turbine,
         config.Rmax,
     )
+    # Convert constraints to JAX arrays and flatten lb and ub
+    A = jnp.array(A)
+    b = jnp.array(b)
+    Aeq = jnp.array(Aeq)
+    beq = jnp.array(beq)
+    lb = jnp.array(lb).ravel()  # Ensure lb is 1-D
+    ub = jnp.array(ub).ravel()  # Ensure ub is 1-D
     # Apply policy with constraints
     actions = policy_id_model.apply(policy_id_params, s_id, Aeq, beq, A, b, ub, lb)
     return actions
 
+
 def get_da_actions(
-    policy_da_params: Any,
-    policy_da_model: nn.Module,
-    s_da: jnp.ndarray,
-    config: Config
+    policy_da_params: Any, policy_da_model: nn.Module, s_da: jnp.ndarray, config: Config
 ) -> jnp.ndarray:
     # Build constraints
     lb, ub = h_.build_constraints_DA(config.x_max_pump, config.x_max_turbine)
+    lb = jnp.array(lb).ravel()  # Ensure lb is 1-D
+    ub = jnp.array(ub).ravel()  # Ensure ub is 1-D
     # Apply policy with constraints
     actions = policy_da_model.apply(policy_da_params, s_da, ub, lb)
     return actions
+
 
 # %%
 # ------------------------
@@ -326,10 +344,10 @@ def update_q_id(
     r_id: jnp.ndarray,
     s_da_next: jnp.ndarray,
     config: Config,
-    gamma: float = 0.99
+    gamma: float = 0.99,
 ) -> Tuple[Any, Any, jnp.ndarray]:
     # Compute Q_DA(s_{t+1}^{DA}, policy_DA(s_{t+1}^{DA}))
-    next_da_actions = get_da_actions(policy_da_params, policy_da_model, s_da_next, config)
+    next_da_actions = get_da_actions(policy_da_params, q_da_model, s_da_next, config)
     q_da_values = q_da_model.apply(q_da_target_params, s_da_next, next_da_actions)
     q_target_id = r_id + gamma * q_da_values
 
@@ -342,6 +360,7 @@ def update_q_id(
     updates, q_id_opt_state_new = q_id_opt.update(grads, q_id_opt_state)
     q_id_params_new = optax.apply_updates(q_id_params, updates)
     return q_id_params_new, q_id_opt_state_new, q_estimate
+
 
 @jax.jit
 def update_q_da(
@@ -357,10 +376,10 @@ def update_q_da(
     r_da: jnp.ndarray,
     s_id_next: jnp.ndarray,
     config: Config,
-    gamma: float = 0.99
+    gamma: float = 0.99,
 ) -> Tuple[Any, Any, jnp.ndarray]:
     # Compute Q_ID(s_{t}^{ID}, policy_ID(s_{t}^{ID}))
-    next_id_actions = get_id_actions(policy_id_params, policy_id_model, s_id_next, config)
+    next_id_actions = get_id_actions(policy_id_params, q_id_model, s_id_next, config)
     q_id_values = q_id_model.apply(q_id_target_params, s_id_next, next_id_actions)
     q_target_da = r_da + gamma * q_id_values
 
@@ -374,6 +393,7 @@ def update_q_da(
     q_da_params_new = optax.apply_updates(q_da_params, updates)
     return q_da_params_new, q_da_opt_state_new, q_da_values
 
+
 @jax.jit
 def update_policy_da(
     policy_da_params: Any,
@@ -381,15 +401,15 @@ def update_policy_da(
     q_da_params: Any,
     q_da_model: nn.Module,
     s_da: jnp.ndarray,
-    config: Config
+    config: Config,
 ) -> Tuple[Any, Any]:
     # Deterministic policy gradient: maximize Q(s, pi(s))
     def loss_fn(params):
         a_da = policy_da_model.apply(
             params,
             s_da,
-            jnp.ones((s_da.shape[0], config.length_R)) * config.x_max_pump,  # Adjust based on action_dim_da
-            jnp.zeros((s_da.shape[0], config.length_R))                     # Adjust based on action_dim_da
+            jnp.ones(action_dim_da) * config.x_max_pump,  # 1-D array
+            jnp.zeros(action_dim_da),  # 1-D array
         )
         q_values = q_da_model.apply(q_da_params, s_da, a_da)
         return -jnp.mean(q_values)
@@ -399,6 +419,7 @@ def update_policy_da(
     policy_da_params_new = optax.apply_updates(policy_da_params, updates)
     return policy_da_params_new, policy_da_opt_state_new
 
+
 @jax.jit
 def update_policy_id(
     policy_id_params: Any,
@@ -406,7 +427,7 @@ def update_policy_id(
     q_id_params: Any,
     q_id_model: nn.Module,
     s_id: jnp.ndarray,
-    config: Config
+    config: Config,
 ) -> Tuple[Any, Any]:
     # Deterministic policy gradient: maximize Q(s, pi(s))
     def loss_fn(params):
@@ -417,8 +438,8 @@ def update_policy_id(
             [],  # beq
             [],  # A
             [],  # b
-            jnp.ones((s_id.shape[0], config.length_R)) * config.x_max_pump,  # Adjust based on action_dim_id
-            jnp.zeros((s_id.shape[0], config.length_R))                     # Adjust based on action_dim_id
+            jnp.ones(action_dim_id) * config.x_max_pump,  # 1-D array
+            jnp.zeros(action_dim_id),  # 1-D array
         )
         q_values = q_id_model.apply(q_id_params, s_id, a_id)
         return -jnp.mean(q_values)
@@ -427,6 +448,7 @@ def update_policy_id(
     updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
     policy_id_params_new = optax.apply_updates(policy_id_params, updates)
     return policy_id_params_new, policy_id_opt_state_new
+
 
 # %%
 # ------------------------
@@ -447,6 +469,31 @@ action_dim_da = actions_da.shape[1]  # Number of action dimensions
 state_dim_id = states_id.shape[1]
 action_dim_id = actions_id.shape[1]
 
+# Validate that action_dim_id matches the length of lb and ub
+A_test, b_test, Aeq_test, beq_test, lb_test, ub_test = h_.build_constraints_ID(
+    state=states_id[0],  # Using the first sample for validation
+    Delta_ti=config.Delta_ti,
+    beta_pump=config.beta_pump,
+    beta_turbine=config.beta_turbine,
+    c_pump_up=config.c_pump_up,
+    c_pump_down=config.c_pump_down,
+    c_turbine_up=config.c_turbine_up,
+    c_turbine_down=config.c_turbine_down,
+    x_min_pump=config.x_min_pump,
+    x_max_pump=config.x_max_pump,
+    x_min_turbine=config.x_min_turbine,
+    x_max_turbine=config.x_max_turbine,
+    Rmax=config.Rmax,
+)
+
+assert (
+    len(lb_test) == action_dim_id
+), f"Length of lb ({len(lb_test)}) does not match action_dim_id ({action_dim_id})"
+assert (
+    len(ub_test) == action_dim_id
+), f"Length of ub ({len(ub_test)}) does not match action_dim_id ({action_dim_id})"
+#%%
+
 # Initialize Models
 q_da_model = QNetwork(state_dim=state_dim_da, action_dim=action_dim_da)
 q_id_model = QNetwork(state_dim=state_dim_id, action_dim=action_dim_id)
@@ -465,16 +512,29 @@ q_id_params = q_id_model.init(id_key, dummy_s_id, dummy_a_id)
 policy_da_params = policy_da_model.init(
     pda_key,
     dummy_s_da,
-    jnp.ones((1, action_dim_da)) * config.x_max_pump,
-    jnp.zeros((1, action_dim_da))
-)
+    jnp.ones(action_dim_da) * config.x_max_pump,  # 1-D array
+    jnp.zeros(action_dim_da),  # 1-D array
+    )
+
+#%%
+# Assume action_dim_id is known
+Aeq_init = jnp.zeros((0, action_dim_id))  # No equality constraints
+beq_init = jnp.zeros((0,))
+A_init = jnp.zeros((0, action_dim_id))    # No inequality constraints
+b_init = jnp.zeros((0,))
+
 policy_id_params = policy_id_model.init(
     pid_key,
     dummy_s_id,
-    [], [], [], [],  # Empty constraints for initialization
-    jnp.ones((1, action_dim_id)) * config.x_max_pump,
-    jnp.zeros((1, action_dim_id))
+    Aeq_init,       # instead of []
+    beq_init,       # instead of []
+    A_init,         # instead of []
+    b_init,         # instead of []
+    jnp.ones(action_dim_id) * config.x_max_pump,
+    jnp.zeros(action_dim_id),
 )
+
+#%%
 
 # Initialize Target Networks
 q_da_target_params = q_da_params
@@ -516,16 +576,11 @@ for epoch in range(config.num_epochs):
             r_id,
             s_da_next,
             config,
-            config.gamma
+            config.gamma,
         )
 
         policy_id_params, policy_id_opt_state = update_policy_id(
-            policy_id_params,
-            policy_id_opt_state,
-            q_id_params,
-            q_id_model,
-            s_id,
-            config
+            policy_id_params, policy_id_opt_state, q_id_params, q_id_model, s_id, config
         )
 
     # Train Q_DA and Policy_DA
@@ -548,16 +603,11 @@ for epoch in range(config.num_epochs):
             r_da,
             s_id_next,
             config,
-            config.gamma
+            config.gamma,
         )
 
         policy_da_params, policy_da_opt_state = update_policy_da(
-            policy_da_params,
-            policy_da_opt_state,
-            q_da_params,
-            q_da_model,
-            s_da,
-            config
+            policy_da_params, policy_da_opt_state, q_da_params, q_da_model, s_da, config
         )
 
     # Soft update target networks
@@ -565,6 +615,7 @@ for epoch in range(config.num_epochs):
     q_id_target_params = soft_update(q_id_target_params, q_id_params, tau=0.005)
 
     print(f"Epoch {epoch + 1}/{config.num_epochs} finished.")
+
 
 # %%
 # ------------------------
@@ -574,17 +625,19 @@ def sample_action_da(
     policy_da_params: Any,
     policy_da_model: nn.Module,
     s_da_example: jnp.ndarray,
-    config: Config
+    config: Config,
 ) -> jnp.ndarray:
     return get_da_actions(policy_da_params, policy_da_model, s_da_example, config)
+
 
 def sample_action_id(
     policy_id_params: Any,
     policy_id_model: nn.Module,
     s_id_example: jnp.ndarray,
-    config: Config
+    config: Config,
 ) -> jnp.ndarray:
     return get_id_actions(policy_id_params, policy_id_model, s_id_example, config)
+
 
 # %%
 # ------------------------

@@ -83,6 +83,8 @@ c_pump_down = t_ramp_pump_down / 2
 c_turbine_up = t_ramp_turbine_up / 2
 c_turbine_down = t_ramp_turbine_down / 2
 
+# %%
+
 
 # ------------------------
 # Load Data
