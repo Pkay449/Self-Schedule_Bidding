@@ -226,41 +226,65 @@ def solve_qp(
     ub: jnp.ndarray,
     lb: jnp.ndarray,
 ) -> jnp.ndarray:
-    # Number of variables
-    n = raw_actions.shape[0]
-
-    # Q and c for the objective:
-    # Minimize 1/2 * ||x - raw_actions||^2
-    # = (1/2) x^T I x - raw_actions^T x + constant
-    Q = jnp.eye(n)
-    c = -raw_actions
+    action_dim = raw_actions.shape[-1]
     
-    # Aeq x = beq : given
+    # Objective: minimize (1/2)*x^T x - raw_actions^T x
+    P = jnp.eye(action_dim)
+    q = -raw_actions
     
-    # print shapes
-    # print("Shapes:")
-    # print("Q:", Q.shape)
-    # print("n:", n)
+    # Equality constraints
+    if Aeq.size > 0:
+        A_eq = Aeq
+        b_eq = beq
+    else:
+        A_eq = None
+        b_eq = None
     
-    # Gx <= h, we must convert x <= ub and x >= lb to Gx <= h
-    # G = [[-I], [I], A] and h = [-lb, ub, b]
-    G = jnp.vstack([-jnp.eye(n), jnp.eye(n), A])
-    h = jnp.concatenate([-lb, ub, b])
+    # Inequality constraints
+    if A.size > 0:
+        G = A
+        h = b
+    else:
+        G = None
+        h = None
     
-    # print shapes
-    # print("Shapes:")
-    # print("Q:", Q.shape)
-    # print("c:", c.shape)
-    # print("Aeq:", Aeq.shape)
-    # print("beq:", beq.shape)
-    # print("G:", G.shape)
-    # print("h:", h.shape)
+    # Bounds as inequality constraints
+    G_bounds = jnp.vstack([jnp.eye(action_dim), -jnp.eye(action_dim)])
+    h_bounds = jnp.concatenate([ub, -lb])
     
+    # Combine inequality constraints
+    if G is not None:
+        G_total = jnp.vstack([G, G_bounds])
+        h_total = jnp.concatenate([h, h_bounds])
+    else:
+        G_total = G_bounds
+        h_total = h_bounds
     
-    # Solve QP
+    # Debug prints
+    print("P:", P)
+    print("q:", q)
+    print("A_eq:", A_eq)
+    print("b_eq:", b_eq)
+    print("G_total:", G_total)
+    print("h_total:", h_total)
+    
+    # Initialize the solver
     solver = OSQP()
-    sol = solver.run(params_obj=(Q, c), params_eq=(Aeq, beq), params_ineq=(G, h)).params
-    return sol.x
+    
+    # Run the solver
+    solution = solver.run(
+        params_obj=(P, q),
+        params_eq=(A_eq, b_eq) if A_eq is not None else None,
+        params_ineq=(G_total, h_total)
+    )
+    
+    # Check solver status
+    if solution.state.status != "solved":
+        print(f"Solver failed with status: {solution.state.status}")
+        raise ValueError(f"QP Solver failed with status: {solution.state.status}")
+    
+    return solution.params.primal
+
 
     
 
