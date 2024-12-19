@@ -34,7 +34,8 @@ class Config:
     gamma: float = 0.99
     batch_size: int = 64
     num_epochs: int = 10
-    learning_rate: float = 1e-3
+    q_learning_rate: float = 1e-4
+    p_learning_rate: float = 1e-5
 
     # Ramp Times (in hours)
     t_ramp_pump_up: float = 2 / 60
@@ -194,18 +195,15 @@ class PolicyNetworkID(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
-        raw_actions = nn.Dense(self.action_dim)(x)  # shape: (1, action_dim)
+        raw_actions = nn.Dense(self.action_dim)(x)  # shape: (action_dim,)
         raw_actions = jnp.squeeze(raw_actions, axis=0)  # shape: (action_dim,)
 
-        # Combine constraints
-        # Aeq_all, beq_all = combine_constraints(Aeq, beq, equality=True)
-        # A_all, b_all = combine_constraints(A, b, equality=False)
-
-        # Define QP problem
+        # Solve QP to get feasible actions
         actions_feasible = solve_qp(
             raw_actions, Aeq, beq, A, b, ub, lb
         )
         return actions_feasible
+
 
 
 
@@ -229,69 +227,71 @@ def solve_qp(
     b: jnp.ndarray,
     ub: jnp.ndarray,
     lb: jnp.ndarray,
+    penalty: float = 1e3  # High penalty for constraint violations
 ) -> jnp.ndarray:
     action_dim = raw_actions.shape[-1]
     
-    # Objective: minimize (1/2)*x^T x - raw_actions^T x
-    P = jnp.eye(action_dim)
-    q = -raw_actions
+    # Check if there are no constraints
+    if A.size == 0 and Aeq.size == 0:
+        # No constraints, simply clip the raw actions to the bounds
+        return jnp.clip(raw_actions, lb, ub)
     
-    # Equality constraints
+    # Proceed with QP formulation when constraints exist
+    slack_dim = A.shape[0] * 2  # One slack for each inequality
+    total_dim = action_dim + slack_dim
+    
+    # Objective: minimize (x - raw_actions)^2 + penalty * sum(slack)
+    P = jnp.block([
+        [jnp.eye(action_dim), jnp.zeros((action_dim, slack_dim))],
+        [jnp.zeros((slack_dim, action_dim)), penalty * jnp.eye(slack_dim)]
+    ])
+    q = jnp.concatenate([
+        -2 * raw_actions,  # For (x - raw_actions)^2 expansion
+        jnp.zeros(slack_dim)
+    ])
+    
+    # Equality constraints: A_eq * x = b_eq
     if Aeq.size > 0:
-        A_eq = Aeq
+        A_eq = jnp.hstack([Aeq, jnp.zeros((Aeq.shape[0], slack_dim))])
         b_eq = beq
     else:
         A_eq = None
         b_eq = None
     
-    # Inequality constraints
+    # Inequality constraints: A * x - s >= b  --> A * x + (-s) >= b
     if A.size > 0:
-        G = A
+        G = jnp.hstack([A, -jnp.eye(slack_dim // 2)])
         h = b
     else:
-        G = None
-        h = None
-    
-    # Bounds as inequality constraints
-    G_bounds = jnp.vstack([jnp.eye(action_dim), -jnp.eye(action_dim)])
-    h_bounds = jnp.concatenate([ub, -lb])
-    
-    # Combine inequality constraints
-    if G is not None:
-        G_total = jnp.vstack([G, G_bounds])
-        h_total = jnp.concatenate([h, h_bounds])
-    else:
-        G_total = G_bounds
-        h_total = h_bounds
-    
-    # Debug prints
-    # print("P:", P)
-    # print("q:", q)
-    # print("A_eq:", A_eq)
-    # print("b_eq:", b_eq)
-    # print("G_total:", G_total)
-    # print("h_total:", h_total)
+        G = jnp.zeros((0, total_dim))
+        h = jnp.zeros((0,))
     
     # Initialize the solver
-    # solver = OSQP()
-    solver = CvxpyQP()
+    solver = OSQP()
     
     # Run the solver
     solution = solver.run(
         params_obj=(P, q),
         params_eq=(A_eq, b_eq) if A_eq is not None else None,
-        params_ineq=(G_total, h_total)
+        params_ineq=(G, h)
     )
     
     # Check solver status
     if solution.state.status != "solved":
-        print(f"Solver failed with status: {solution.state.status}")
-        raise ValueError(f"QP Solver failed with status: {solution.state.status}")
+        print(f"QP Solver failed with status: {solution.state.status}")
+        # Fallback: return raw_actions clipped to [lb, ub]
+        return jnp.clip(raw_actions, lb, ub)
     
-    return solution.params.primal
+    # Extract the primal solution
+    primal = solution.params.primal
+    x_feasible = primal[:action_dim]
+    # Slack variables can be accessed via primal[action_dim:] if needed
+    
+    return x_feasible
 
 
-    
+
+
 
 
 # %%
@@ -556,10 +556,10 @@ q_da_target_params = q_da_params
 q_id_target_params = q_id_params
 
 # Initialize Optimizers
-q_da_opt = optax.adam(config.learning_rate)
-q_id_opt = optax.adam(config.learning_rate)
-policy_da_opt = optax.adam(config.learning_rate)
-policy_id_opt = optax.adam(config.learning_rate)
+q_da_opt = optax.adam(config.q_learning_rate)
+q_id_opt = optax.adam(config.q_learning_rate)
+policy_da_opt = optax.adam(config.p_learning_rate)
+policy_id_opt = optax.adam(config.p_learning_rate)
 
 q_da_opt_state = q_da_opt.init(q_da_params)
 q_id_opt_state = q_id_opt.init(q_id_params)
