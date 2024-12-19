@@ -150,7 +150,7 @@ class QNetworkDA(nn.Module):
 
 class QNetworkID(nn.Module):
     state_dim: int = 890
-    action_dim: int = 1177
+    action_dim: int = 1152
     hidden_dim: int = 256
 
     @nn.compact
@@ -182,7 +182,7 @@ class PolicyDA(nn.Module):
 
 class PolicyID(nn.Module):
     state_dim: int = 890
-    action_dim: int = 1177
+    action_dim: int = 1152
     hidden_dim: int = 256
 
     @nn.compact
@@ -204,7 +204,7 @@ da_key, id_key, pda_key, pid_key = jax.random.split(key, 4)
 dummy_s_da = jnp.ones((1, 842))
 dummy_a_da = jnp.ones((1, 24), dtype=jnp.float32)
 dummy_s_id = jnp.ones((1, 890))
-dummy_a_id = jnp.ones((1, 1177), dtype=jnp.float32)
+dummy_a_id = jnp.ones((1, 1152), dtype=jnp.float32)
 
 q_da_model = QNetworkDA()
 q_id_model = QNetworkID()
