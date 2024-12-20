@@ -1,21 +1,5 @@
 #%%
-# %%[markdown]
-# #### Neural Fitted Q-Iteration with Continuous Actions (NFQCA)
-#
-# **Input:** MDP $(S, A, P, R, \gamma)$, base points $\mathcal{B}$, Q-function $q(s,a; \boldsymbol{\theta})$, policy $d(s; \boldsymbol{w})$
-#
-# **Output:** Parameters $\boldsymbol{\theta}$ for Q-function, $\boldsymbol{w}$ for policy
-#
-# 1. Initialize $\boldsymbol{\theta}_0$, $\boldsymbol{w}_0$
-# 2. **for** $n = 0,1,2,...$ **do**
-#     1. $\mathcal{D}_q \leftarrow \emptyset$
-#     2. For each $(s,a,r,s') \in \mathcal{B}$:
-#         1. $a'_{s'} \leftarrow d(s'; \boldsymbol{w}_n)$
-#         2. $y_{s,a} \leftarrow r + \gamma q(s', a'_{s'}; \boldsymbol{\theta}_n)$
-#         3. $\mathcal{D}_q \leftarrow \mathcal{D}_q \cup \{((s,a), y_{s,a})\}$
-#     3. $\boldsymbol{\theta}_{n+1} \leftarrow \texttt{fit}(\mathcal{D}_q)$
-#     4. $\boldsymbol{w}_{n+1} \leftarrow \texttt{minimize}_{\boldsymbol{w}} -\frac{1}{|\mathcal{B}|} \sum_{(s,a,r,s') \in \mathcal{B}} q(s, d(s; \boldsymbol{w}); \boldsymbol{\theta}_{n+1})$
-# 3. **return** $\boldsymbol{\theta}_n$, $\boldsymbol{w}_n$
+# main.py
 #%%
 import os
 import warnings
@@ -31,6 +15,8 @@ import numpy as np
 from functools import partial
 
 from config import SimulationParams
+from helper import build_constraints_batch
+# %%
 
 # Suppress warnings and set working directory
 warnings.filterwarnings("ignore")
@@ -139,9 +125,10 @@ class PolicyID(nn.Module):
         raw_actions = nn.Dense(self.action_dim)(x)
 
         # Define masks for bounded and unbounded actions
-        mask_bound = jnp.concatenate([jnp.ones(96), jnp.zeros(672), jnp.ones(384)])
-        scaled_actions = self.lb + (self.ub - self.lb) * nn.sigmoid(raw_actions)
-        final_actions = mask_bound * scaled_actions + (1.0 - mask_bound) * raw_actions
+        # mask_bound = jnp.concatenate([jnp.ones(96), jnp.zeros(672), jnp.ones(384)])
+        # scaled_actions = self.lb + (self.ub - self.lb) * nn.sigmoid(raw_actions)
+        # final_actions = mask_bound * scaled_actions + (1.0 - mask_bound) * raw_actions
+        final_actions = raw_actions
         return final_actions
 
 
@@ -296,6 +283,61 @@ def update_policy_id(policy_id_params, policy_id_opt_state, q_id_params, s_id):
     return policy_id_params_new, policy_id_opt_state_new
 
 
+from functools import partial
+
+@partial(jax.jit, static_argnums=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
+def update_policy_id_with_penalty(
+    policy_id_params, policy_id_opt_state, q_id_params,
+    states_id, Delta_ti, beta_pump, beta_turbine,
+    c_pump_up, c_pump_down, c_turbine_up, c_turbine_down,
+    x_min_pump, x_max_pump, x_min_turbine, x_max_turbine,
+    Rmax
+):
+    """
+    Update Policy_ID by maximizing Q_ID(s, policy_ID(s)) with penalty for constraint violations.
+    """
+    def loss_fn(params):
+        a_id = policy_id_model.apply(params, states_id)
+        q_values = q_id_model.apply(q_id_params, states_id, a_id)
+        
+        # Compute constraints
+        A, b, Aeq, beq, lb, ub = build_constraints_batch(
+            states_id,
+            Delta_ti, beta_pump, beta_turbine,
+            c_pump_up, c_pump_down,
+            c_turbine_up, c_turbine_down,
+            x_min_pump, x_max_pump,
+            x_min_turbine, x_max_turbine,
+            Rmax
+        )
+        
+        # Penalty for A * x <= b
+        Ax = jnp.einsum('bkc,bc->bk', A, a_id)  # Shape: (batch_size, num_constraints)
+        penalty_ineq = jnp.maximum(Ax - b, 0.0)
+        penalty_eq = jnp.abs(jnp.einsum('bkc,bc->bk', Aeq, a_id) - beq)
+        penalty_ub = jnp.maximum(a_id - ub, 0.0)
+        penalty_lb = jnp.maximum(lb - a_id, 0.0)
+        
+        # Aggregate penalties
+        penalty = (
+            jnp.sum(penalty_ineq ** 2) +
+            jnp.sum(penalty_eq ** 2) +
+            jnp.sum(penalty_ub ** 2) +
+            jnp.sum(penalty_lb ** 2)
+        )
+        
+        # Total loss
+        return -jnp.mean(q_values) + 1e3 * penalty  # 1e3 is a hyperparameter
+        
+    grads = jax.grad(loss_fn)(policy_id_params)
+    updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
+    policy_id_params_new = optax.apply_updates(policy_id_params, updates)
+    return policy_id_params_new, policy_id_opt_state_new
+
+
+
+
+
 # ----------------------------------------------------
 # Training Loop
 # ----------------------------------------------------
@@ -307,13 +349,30 @@ for epoch in range(num_epochs):
         r_id = jnp.array(r_id, dtype=jnp.float32).reshape(-1, 1)
         s_da_next = jnp.array(s_da_next, dtype=jnp.float32)
 
+        # Update Q_ID
         q_id_params, q_id_opt_state, _ = update_q_id(
             q_id_params, q_id_opt_state, q_id_target_params, q_da_target_params,
             policy_da_params, s_id, a_id, r_id, s_da_next
         )
 
-        policy_id_params, policy_id_opt_state = update_policy_id(
-            policy_id_params, policy_id_opt_state, q_id_params, s_id
+        # Update Policy_ID with penalties
+        policy_id_params, policy_id_opt_state = update_policy_id_with_penalty(
+            policy_id_params,
+            policy_id_opt_state,
+            q_id_params,
+            s_id,
+            sim_params.Delta_ti,
+            sim_params.beta_pump,
+            sim_params.beta_turbine,
+            sim_params.c_pump_up,
+            sim_params.c_pump_down,
+            sim_params.c_turbine_up,
+            sim_params.c_turbine_down,
+            sim_params.x_min_pump,
+            sim_params.x_max_pump,
+            sim_params.x_min_turbine,
+            sim_params.x_max_turbine,
+            sim_params.Rmax
         )
 
     # Train Q_DA and Policy_DA
@@ -323,11 +382,13 @@ for epoch in range(num_epochs):
         r_da = jnp.array(r_da, dtype=jnp.float32).reshape(-1, 1)
         s_id_next = jnp.array(s_id_next, dtype=jnp.float32)
 
+        # Update Q_DA
         q_da_params, q_da_opt_state, _ = update_q_da(
             q_da_params, q_da_opt_state, q_da_target_params, q_id_target_params,
             policy_id_params, s_da, a_da, r_da, s_id_next
         )
 
+        # Update Policy_DA
         policy_da_params, policy_da_opt_state = update_policy_da(
             policy_da_params, policy_da_opt_state, q_da_params, s_da
         )
@@ -338,6 +399,7 @@ for epoch in range(num_epochs):
 
     print(f"Epoch {epoch+1}/{num_epochs} completed.")
 
+
 # %%
 # ----------------------------------------------------
 # Action Sampling (Inference)
@@ -345,17 +407,36 @@ for epoch in range(num_epochs):
 def sample_action_da(params, s_da_example: jnp.ndarray) -> jnp.ndarray:
     return policy_da_model.apply(params, s_da_example)
 
-def sample_action_id(params, s_id_example: jnp.ndarray) -> jnp.ndarray:
-    return policy_id_model.apply(params, s_id_example)
+def sample_action_id(policy_id_params, states_id_example, config):
+    raw_actions = policy_id_model.apply(policy_id_params, states_id_example)
+    # Optionally, apply projection or clipping if needed
+    # For penalty methods, this is usually not required
+    return raw_actions
 
 # Example inference
 s_da_example = jnp.ones((1, 842), dtype=jnp.float32)
 da_action = sample_action_da(policy_da_params, s_da_example)
 
 s_id_example = jnp.ones((1, 890), dtype=jnp.float32)
-id_action = sample_action_id(policy_id_params, s_id_example)
+id_action = sample_action_id(policy_id_params, s_id_example, sim_params)
 
 print("Sample DA action:", da_action)
 print("Sample ID action:", id_action)
+
+
+# Example inference
+s_da_example = jnp.ones((1, 842), dtype=jnp.float32)
+da_action = sample_action_da(policy_da_params, s_da_example)
+
+s_id_example = jnp.ones((1, 890), dtype=jnp.float32)
+id_action = sample_action_id(policy_id_params, s_id_example, sim_params)
+
+print("Sample DA action:", da_action)
+print("Sample ID action:", id_action)
+
+# %%
+
+
+
 
 # %%
