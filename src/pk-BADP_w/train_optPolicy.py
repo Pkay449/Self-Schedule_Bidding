@@ -37,7 +37,7 @@ if False:  # Example if no arguments are given, just hardcode as in MATLAB
 
 N = 50
 M = 10
-T = 3
+T = 30
 Season = "Summer"
 length_R = 5
 seed = 2
@@ -231,11 +231,11 @@ def train_policy():
                     )
 
                     intcon = np.arange(8 * 96, 96 * 10)
-                    
+
                     x_opt, fval = build_and_solve_intlinprog(eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options)
 
                     Vt[iR, ix, n, t_i] = -fval
-                    
+
     return Vt, P_day_state, P_intra_state
 
 Vt, P_day_state, P_intra_state = train_policy()

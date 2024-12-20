@@ -37,8 +37,8 @@ if False:  # Example if no arguments are given, just hardcode as in MATLAB
     Season = "Summer"
 
 N = 50
-M = 50
-T = 3
+M = 10
+T = 30
 Season = "Summer"
 length_R = 5
 seed = 2
@@ -120,7 +120,7 @@ def evaluate_optPolicy_2series():
     da_s = [] # R_Start , x_start, P_history = 1 + 1 + 24*7 + 96*7
     da_a = []
     da_r = []
-    da_s_prime = [] # Da_s + x_day_opt + Wt+1_day 
+    da_s_prime = [] # Da_s + x_day_opt + Wt+1_day
 
     id_s = []
     id_a = []
@@ -563,7 +563,7 @@ def evaluate_optPolicy_2series():
             x_opt2, fval2 = build_and_solve_intlinprog(
                 eng, f, A, b, Aeq, beq, lb, ub, intcon, intlinprog_options
             )
-            
+
             action_id = x_opt2[:-25]
 
             id_a.append(action_id)
@@ -640,27 +640,27 @@ def evaluate_optPolicy_2series():
 
     EV = np.mean(V)
     print(EV)
-    
+
     # Save offline dataset as pickle
-    
+
     df_da = pd.DataFrame({
         'state': da_s,
         'action': da_a,
         'reward': da_r,
         'next_state': da_s_prime
     })
-    
+
     df_da.to_pickle("Results/offline_dataset_day_ahead.pkl")
-    
+
     df_id = pd.DataFrame({
         'state': id_s,
         'action': id_a,
         'reward': id_r,
         'next_state': id_s_prime
     })
-    
+
     df_id.to_pickle("Results/offline_dataset_intraday.pkl")
-    
+
     return EV
 # %%
 

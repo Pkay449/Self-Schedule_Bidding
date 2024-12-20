@@ -1,6 +1,4 @@
 #%%
-# main.py
-#%%
 import os
 import warnings
 import pickle as pkl
@@ -16,6 +14,7 @@ from functools import partial
 
 from config import SimulationParams
 from helper import build_constraints_batch
+from eval_learned_policy import eval_learned_policy
 # %%
 
 # Suppress warnings and set working directory
@@ -27,7 +26,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # ----------------------------------------------------
 def load_offline_data(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Loads offline dataset from a pickle file. The file is expected to contain a dictionary 
+    Loads offline dataset from a pickle file. The file is expected to contain a dictionary
     with keys: "state", "action", "reward", "next_state". Each value should be a Series
     or array-like from which we can extract arrays.
 
@@ -43,8 +42,8 @@ def load_offline_data(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np
     return states, actions, rewards, next_states
 
 
-def batch_iter(data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], 
-               batch_size: int, 
+def batch_iter(data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+               batch_size: int,
                shuffle: bool = True):
     """
     Generator that yields mini-batches of data.
@@ -139,7 +138,7 @@ def mse_loss(pred: jnp.ndarray, target: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean((pred - target) ** 2)
 
 def soft_update(target_params, online_params, tau=0.005):
-    return jax.tree_util.tree_map(lambda tp, op: tp * (1 - tau) + op * tau, 
+    return jax.tree_util.tree_map(lambda tp, op: tp * (1 - tau) + op * tau,
                                   target_params, online_params)
 
 
@@ -163,7 +162,7 @@ lb_id = np.concatenate([
 ]).astype(np.float32)
 
 ub_id = np.concatenate([
-    sim_params.x_max_pump * np.ones(96),  # bounded 
+    sim_params.x_max_pump * np.ones(96),  # bounded
     POS_INF * np.ones(672),               # unbounded (upper bound ~ inf)
     np.ones(384)                          # bounded
 ]).astype(np.float32)
@@ -299,7 +298,7 @@ def update_policy_id_with_penalty(
     def loss_fn(params):
         a_id = policy_id_model.apply(params, states_id)
         q_values = q_id_model.apply(q_id_params, states_id, a_id)
-        
+
         # Compute constraints
         A, b, Aeq, beq, lb, ub = build_constraints_batch(
             states_id,
@@ -310,14 +309,14 @@ def update_policy_id_with_penalty(
             x_min_turbine, x_max_turbine,
             Rmax
         )
-        
+
         # Penalty for A * x <= b
         Ax = jnp.einsum('bkc,bc->bk', A, a_id)  # Shape: (batch_size, num_constraints)
         penalty_ineq = jnp.maximum(Ax - b, 0.0)
         penalty_eq = jnp.abs(jnp.einsum('bkc,bc->bk', Aeq, a_id) - beq)
         penalty_ub = jnp.maximum(a_id - ub, 0.0)
         penalty_lb = jnp.maximum(lb - a_id, 0.0)
-        
+
         # Aggregate penalties
         penalty = (
             jnp.sum(penalty_ineq ** 2) +
@@ -325,10 +324,10 @@ def update_policy_id_with_penalty(
             jnp.sum(penalty_ub ** 2) +
             jnp.sum(penalty_lb ** 2)
         )
-        
+
         # Total loss
         return -jnp.mean(q_values) + 1e3 * penalty  # 1e3 is a hyperparameter
-        
+
     grads = jax.grad(loss_fn)(policy_id_params)
     updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
     policy_id_params_new = optax.apply_updates(policy_id_params, updates)
@@ -433,10 +432,7 @@ id_action = sample_action_id(policy_id_params, s_id_example, sim_params)
 
 print("Sample DA action:", da_action)
 print("Sample ID action:", id_action)
-
-# %%
-
-
+eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, policy_da_params)
 
 
 # %%
