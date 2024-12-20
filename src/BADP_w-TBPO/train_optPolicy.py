@@ -16,12 +16,24 @@
 #     4. $\boldsymbol{w}_{n+1} \leftarrow \texttt{minimize}_{\boldsymbol{w}} -\frac{1}{|\mathcal{B}|} \sum_{(s,a,r,s') \in \mathcal{B}} q(s, d(s; \boldsymbol{w}); \boldsymbol{\theta}_{n+1})$
 # 3. **return** $\boldsymbol{\theta}_n$, $\boldsymbol{w}_n$
 # %%
-import numpy as np
-import pickle as pkl
-from matplotlib import pyplot as plt
-
 import os
 import warnings
+import pickle as pkl
+from dataclasses import dataclass
+from typing import Any, Dict, Tuple
+
+import numpy as np
+import jax
+import jax.numpy as jnp
+import optax
+from flax import linen as nn
+from functools import partial
+from matplotlib import pyplot as plt
+
+# Import your configuration
+from config import SimulationParams
+
+# Suppress warnings and set working directory
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,6 +44,9 @@ id_path = "Results/offline_dataset_intraday.pkl"
 
 da_df = pkl.load(open(da_path, "rb"))
 id_df = pkl.load(open(id_path, "rb"))
+
+# Load Simulation Parameters
+sim_params = SimulationParams()
 
 # %%
 
@@ -56,42 +71,42 @@ import pickle
 # ------------------------
 # Parameters
 # ------------------------
-Season = "Summer"
-length_R = 5
-seed = 2
-D = 7  # days in forecast
-Rmax = 100
-np.random.seed(seed)
+# Season = "Summer"
+# length_R = 5
+# seed = 2
+# D = 7  # days in forecast
+# Rmax = 100
+# np.random.seed(seed)
 
-t_ramp_pump_up = 2 / 60
-t_ramp_pump_down = 2 / 60
-t_ramp_turbine_up = 2 / 60
-t_ramp_turbine_down = 2 / 60
+# t_ramp_pump_up = 2 / 60
+# t_ramp_pump_down = 2 / 60
+# t_ramp_turbine_up = 2 / 60
+# t_ramp_turbine_down = 2 / 60
 
-c_grid_fee = 5 / 4
-Delta_ti = 0.25
-Delta_td = 1.0
+# c_grid_fee = 5 / 4
+# Delta_ti = 0.25
+# Delta_td = 1.0
 
-Q_mult = 1.2
-Q_fix = 3
-Q_start_pump = 15
-Q_start_turbine = 15
+# Q_mult = 1.2
+# Q_fix = 3
+# Q_start_pump = 15
+# Q_start_turbine = 15
 
-beta_pump = 0.9
-beta_turbine = 0.9
+# beta_pump = 0.9
+# beta_turbine = 0.9
 
-x_max_pump = 10
-x_min_pump = 5
-x_max_turbine = 10
-x_min_turbine = 5
+# x_max_pump = 10
+# x_min_pump = 5
+# x_max_turbine = 10
+# x_min_turbine = 5
 
-R_vec = np.linspace(0, Rmax, length_R)
-x_vec = np.array([-x_max_turbine, 0, x_max_pump])
+# R_vec = np.linspace(0, Rmax, length_R)
+# x_vec = np.array([-x_max_turbine, 0, x_max_pump])
 
-c_pump_up = t_ramp_pump_up / 2
-c_pump_down = t_ramp_pump_down / 2
-c_turbine_up = t_ramp_turbine_up / 2
-c_turbine_down = t_ramp_turbine_down / 2
+# c_pump_up = t_ramp_pump_up / 2
+# c_pump_down = t_ramp_pump_down / 2
+# c_turbine_up = t_ramp_turbine_up / 2
+# c_turbine_down = t_ramp_turbine_down / 2
 
 
 # ------------------------
@@ -165,9 +180,12 @@ class QNetworkID(nn.Module):
 
 
 class PolicyDA(nn.Module):
+    ub : float # upper bound
+    lb : float # lower bound
     state_dim: int = 842
     action_dim: int = 24
     hidden_dim: int = 256
+
 
     @nn.compact
     def __call__(self, state):
@@ -177,6 +195,9 @@ class PolicyDA(nn.Module):
         x = nn.relu(x)
         # Output a vector of action_dim floats (continuous actions)
         actions = nn.Dense(self.action_dim)(x)
+
+        actions = self.lb + (self.ub - self.lb) * nn.sigmoid(actions)
+
         return actions
 
 
@@ -208,7 +229,7 @@ dummy_a_id = jnp.ones((1, 1152), dtype=jnp.float32)
 
 q_da_model = QNetworkDA()
 q_id_model = QNetworkID()
-policy_da_model = PolicyDA()
+policy_da_model = PolicyDA(ub= sim_params.x_max_pump, lb= -1*sim_params.x_max_turbine)
 policy_id_model = PolicyID()
 
 q_da_params = q_da_model.init(da_key, dummy_s_da, dummy_a_da)
