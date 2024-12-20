@@ -199,22 +199,61 @@ class PolicyDA(nn.Module):
         actions = self.lb + (self.ub - self.lb) * nn.sigmoid(actions)
 
         return actions
+    
+# Define large finite values to approximate infinity
+NEG_INF = -1e6
+POS_INF = 1e6
+
+# Define bounds for PolicyID
+lb_id = np.concatenate([
+    np.zeros(96),               # First 96 actions: lower bound = 0
+    NEG_INF * np.ones(672),     # Next 672 actions: lower bound = -1e6 (approx. -inf)
+    np.zeros(384)               # Last 384 actions: lower bound = 0
+]).astype(np.float32)
+
+ub_id = np.concatenate([
+    sim_params.x_max_pump * np.ones(96),  # First 96 actions: upper bound = Rmax
+    POS_INF * np.ones(672),              # Next 672 actions: upper bound = 1e6 (approx. inf)
+    np.ones(384)                         # Last 384 actions: upper bound = 1
+]).astype(np.float32)
+
 
 
 class PolicyID(nn.Module):
+    lb: jnp.ndarray  # Lower bounds, shape (1152,)
+    ub: jnp.ndarray  # Upper bounds, shape (1152,)
     state_dim: int = 890
     action_dim: int = 1152
     hidden_dim: int = 256
 
     @nn.compact
-    def __call__(self, state):
+    def __call__(self, state: jnp.ndarray) -> jnp.ndarray:
+        # Forward pass through the network
         x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
-        # Output a vector of action_dim floats (continuous actions)
-        actions = nn.Dense(self.action_dim)(x)
-        return actions
+        
+        # Output raw actions
+        raw_actions = nn.Dense(self.action_dim)(x)
+        
+        # Define masks for bounded and unbounded actions
+        # Bounded: first 96 and last 384 actions
+        # Unbounded: middle 672 actions
+        mask_bound = jnp.concatenate([
+            jnp.ones(96),
+            jnp.zeros(672),
+            jnp.ones(384)
+        ])
+        
+        # Apply sigmoid scaling to bounded actions
+        scaled_actions = self.lb + (self.ub - self.lb) * nn.sigmoid(raw_actions)
+        
+        # Combine scaled and unscaled actions
+        final_actions = mask_bound * scaled_actions + (1.0 - mask_bound) * raw_actions
+        
+        return final_actions
+
 
 
 # Initialize PRNGKeys
@@ -230,7 +269,12 @@ dummy_a_id = jnp.ones((1, 1152), dtype=jnp.float32)
 q_da_model = QNetworkDA()
 q_id_model = QNetworkID()
 policy_da_model = PolicyDA(ub= sim_params.x_max_pump, lb= -1*sim_params.x_max_turbine)
-policy_id_model = PolicyID()
+# Convert lb_id and ub_id to JAX arrays
+lb_id_jax = jnp.array(lb_id)
+ub_id_jax = jnp.array(ub_id)
+# Initialize PolicyID with lb and ub
+policy_id_model = PolicyID(lb=lb_id_jax, ub=ub_id_jax)
+
 
 q_da_params = q_da_model.init(da_key, dummy_s_da, dummy_a_da)
 q_id_params = q_id_model.init(id_key, dummy_s_id, dummy_a_id)
