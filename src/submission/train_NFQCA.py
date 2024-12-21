@@ -4,6 +4,7 @@ import warnings
 import pickle as pkl
 from dataclasses import dataclass
 from typing import Tuple
+import pandas as pd
 
 import jax
 import jax.numpy as jnp
@@ -24,23 +25,13 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # ----------------------------------------------------
 # Load Offline Data
 # ----------------------------------------------------
-def load_offline_data(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Loads offline dataset from a pickle file. The file is expected to contain a dictionary
-    with keys: "state", "action", "reward", "next_state". Each value should be a Series
-    or array-like from which we can extract arrays.
-
-    Returns:
-        states, actions, rewards, next_states
-    """
-    with open(path, "rb") as f:
-        df = pkl.load(f)
-    states = np.stack(df["state"].values)
-    actions = np.stack(df["action"].values)
-    rewards = df["reward"].values
-    next_states = np.stack(df["next_state"].values)
-    return states, actions, rewards, next_states
-
+##Double check this load##
+with open(path, "rb") as f:
+    df = pkl.load(f)
+states = np.stack(df["state"].values)
+actions = np.stack(df["action"].values)
+rewards = df["reward"].values
+next_states = np.stack(df["next_state"].values)
 
 def batch_iter(data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
                batch_size: int,
@@ -147,9 +138,32 @@ def soft_update(target_params, online_params, tau=0.005):
 # ----------------------------------------------------
 sim_params = SimulationParams()
 
-# Load datasets
-da_data = load_offline_data("Results/offline_dataset_day_ahead.pkl")
-id_data = load_offline_data("Results/offline_dataset_intraday.pkl")
+
+def load_offline_data(file_name):
+    """
+    Load offline data from the Results folder.
+
+    Parameters
+    ----------
+    file_name : str
+        Name of the pickle file to load.
+
+    Returns
+    -------
+    DataFrame
+        Loaded pandas DataFrame from the specified pickle file.
+    """
+    # Get the script's directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    results_dir = os.path.join(script_dir, "Results")
+    file_path = os.path.join(results_dir, file_name)
+    with open(file_path, "rb") as file:
+        data = pkl.load(file)
+    return data
+
+# Load data from the Results folder
+da_data = load_offline_data("offline_dataset_day_ahead.pkl")
+id_data = load_offline_data("offline_dataset_intraday.pkl")
 
 # Bounds for PolicyID
 NEG_INF = -1e6

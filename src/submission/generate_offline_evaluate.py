@@ -19,6 +19,11 @@ from helper import generate_scenarios, compute_weights, build_and_solve_intlinpr
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# Get the script's directory for saving results
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Define the path to the Results folder
+results_dir = os.path.join(script_dir, "Results")
+
 # =====================
 # Constants and Parameters
 # =====================
@@ -661,9 +666,6 @@ def evaluate_optPolicy_2series():
         'reward': da_r,
         'next_state': da_s_prime
     })
-
-    df_da.to_pickle("Results/offline_dataset_day_ahead.pkl")
-
     df_id = pd.DataFrame({
         'state': id_s,
         'action': id_a,
@@ -671,7 +673,9 @@ def evaluate_optPolicy_2series():
         'next_state': id_s_prime
     })
 
-    df_id.to_pickle("Results/offline_dataset_intraday.pkl")
+    df_da.to_pickle(os.path.join(results_dir, "offline_dataset_day_ahead.pkl"))
+    df_da.to_pickle(os.path.join(results_dir, "offline_dataset_intraday.pkl"))
+  
 
     return EV
 # %%

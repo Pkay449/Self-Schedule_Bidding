@@ -26,6 +26,11 @@ from helper import (
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# Get the script's directory for saving results
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Define the path to the Results folder
+results_dir = os.path.join(script_dir, "Results")
+
 # =====================
 # Parameters
 # =====================
@@ -249,9 +254,9 @@ def train_policy():
 
 Vt, P_day_state, P_intra_state = train_policy()
 
-# Save Vt, P_day_state, P_intra_state in
-np.save("Results/Vt.npy", Vt)
-np.save("Results/P_day_state.npy", P_day_state)
-np.save("Results/P_intra_state.npy", P_intra_state)
+# Save the numpy arrays to the Results folder
+np.save(os.path.join(results_dir, "Vt.npy"), Vt)
+np.save(os.path.join(results_dir, "P_day_state.npy"), P_day_state)
+np.save(os.path.join(results_dir, "P_intra_state.npy"), P_intra_state)
 
 # %%
