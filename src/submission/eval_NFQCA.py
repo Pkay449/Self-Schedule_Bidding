@@ -3,10 +3,10 @@ import numpy as np
 from scipy.stats import multivariate_normal
 import os
 from scipy.io import loadmat
-# Local imports
+
 from sample_price_day import sample_price_day
 from sample_price_intraday import sample_price_intraday
-from helper_NFQCA import generate_scenarios
+from helper import generate_scenarios
 
 def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, policy_da_params, M=10, T=30, D=7, Season="Summer", seed=2):
     """
