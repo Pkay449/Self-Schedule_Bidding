@@ -3,6 +3,17 @@ from scipy.optimize import minimize_scalar
 from qpsolvers import solve_qp, available_solvers
 
 def VRx_weights(phi, Y, weights_lsqlin):
+    """
+    Compute VRx weights using quadratic programming and kernel-based distance adjustment.
+
+    Parameters:
+    phi (ndarray): Feature matrix of shape (N, d), where N is the number of samples and d is the number of features.
+    Y (ndarray): Target values of shape (N,) or (N, 1).
+    weights_lsqlin (ndarray): Initial weights for the features.
+
+    Returns:
+    ndarray: Optimized weights of shape (N,).
+    """
     if Y.ndim > 1:
         Y = Y.flatten()
 
@@ -11,8 +22,8 @@ def VRx_weights(phi, Y, weights_lsqlin):
     weights_lsqlin[mask] = 0
 
     # Step 2: Compute weighted Euclidean distance
-    diff = (phi - Y) * weights_lsqlin
-    dist = np.sqrt(np.sum(diff**2, axis=1))
+    weighted_diff = (phi - Y) * weights_lsqlin
+    dist = np.sqrt(np.sum(weighted_diff**2, axis=1))
 
     N = phi.shape[0]
 
@@ -37,10 +48,8 @@ def VRx_weights(phi, Y, weights_lsqlin):
     H += epsilon * np.eye(N)
 
     c = -(phi @ W @ Y)
-
     A = np.ones((1, N))
     b = np.array([1.0])
-
     lb = -opt_kernel_dist
     ub = opt_kernel_dist
 

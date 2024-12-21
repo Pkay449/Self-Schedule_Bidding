@@ -27,18 +27,20 @@ def sample_price_intraday(Pt_day, Pt_intraday, t, Season):
     """
 
     # Load required data
-    beta_day_ahead_data = loadmat(f"Data/beta_day_ahead_{Season}.mat")
-    cov_day_data = loadmat(f"Data/cov_day_{Season}.mat")
-    beta_intraday_data = loadmat(f"Data/beta_intraday_{Season}.mat")
-    cov_intraday_data = loadmat(f"Data/cov_intraday_{Season}.mat")
-    DoW_data = loadmat(f"Data/DoW_{Season}.mat")
+    try:
+        beta_day_ahead_data = loadmat(f"Data/beta_day_ahead_{Season}.mat")
+        cov_day_data = loadmat(f"Data/cov_day_{Season}.mat")
+        beta_intraday_data = loadmat(f"Data/beta_intraday_{Season}.mat")
+        cov_intraday_data = loadmat(f"Data/cov_intraday_{Season}.mat")
+        DoW_data = loadmat(f"Data/DoW_{Season}.mat")
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Required data file is missing: {e.filename}")
 
     # Extract variables
     beta_day_ahead = beta_day_ahead_data["beta_day_ahead"]
     cov_day = cov_day_data["cov_day"]
     beta_intraday = beta_intraday_data["beta_intraday"]
     cov_intraday = cov_intraday_data["cov_intraday"]
-
     # We assume DoW_P0 is in DoW_data with variable name 'DoW_P0'
     DoW_P0 = DoW_data["DoW_P0"].item()
 

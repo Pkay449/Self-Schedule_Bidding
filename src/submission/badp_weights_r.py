@@ -2,6 +2,25 @@ import numpy as np
 from scipy.io import loadmat
 
 def badp_weights(T=5):
+    """
+    Compute weights for day-ahead and intraday price influence using predefined coefficients.
+
+    Parameters
+    ----------
+    T : int, optional
+        Number of forecast time steps. Default is 5.
+    D : int, optional
+        Number of days in the forecast. Default is 7.
+    Season : str, optional
+        The season name for selecting the appropriate data files (e.g., "Summer"). Default is "Summer".
+    gamma : float, optional
+        Discount factor for futures prices. Default is 1.0.
+
+    Returns
+    -------
+    weights : np.ndarray
+        Computed weights for day-ahead and intraday prices as a 2D array.
+    """
     # Parameters
     D = 7    # days in forecast
     Season = 'Summer'
@@ -11,7 +30,6 @@ def badp_weights(T=5):
     # Adjust file paths and variable keys according to your environment and data files
     beta_day_ahead_data = loadmat(f'Data/beta_day_ahead_{Season}.mat')
     beta_intraday_data = loadmat(f'Data/beta_intraday_{Season}.mat')
-
     beta_day_ahead = beta_day_ahead_data['beta_day_ahead']
     beta_intraday = beta_intraday_data['beta_intraday']
 
@@ -38,11 +56,9 @@ def badp_weights(T=5):
             Wt_intraday_mat = np.zeros((T, 96))
 
             for t_strich in range(t, T):
-                # Wt_day = Pt_day * beta_day_ahead'
                 # In MATLAB: Wt_day is 1x(24*D)* ( (24*D)x24 ) = 1x24
                 Wt_day = Pt_day @ beta_day_ahead.T  # shape: (24,)
                 
-                # Wt_intraday = [Wt_day, Pt_day, Pt_intraday]*beta_intraday'
                 # Concatenate Wt_day (1x24), Pt_day (1x(24*D)), and Pt_intraday (1x(96*D))
                 # Then multiply by beta_intraday'
                 combined_intraday = np.concatenate([Wt_day, Pt_day, Pt_intraday])
@@ -51,10 +67,8 @@ def badp_weights(T=5):
                 # Update Pt_day and Pt_intraday as per code:
                 Pt_day = np.concatenate([Wt_day, Pt_day[:-24]])
                 Pt_intraday = np.concatenate([Wt_intraday, Pt_intraday[:-96]])
-
                 Wt_day_mat[t_strich, :] = Wt_day
                 Wt_intraday_mat[t_strich, :] = Wt_intraday
-
                 einfluss_day[t, i] += (4 * np.sum(np.abs(Wt_day)) + np.sum(np.abs(Wt_intraday))) * (gamma ** (t_strich - t))
 
     # Compute einfluss_intraday
@@ -73,18 +87,13 @@ def badp_weights(T=5):
 
                 Pt_day = np.concatenate([Wt_day, Pt_day[:-24]])
                 Pt_intraday = np.concatenate([Wt_intraday, Pt_intraday[:-96]])
-
                 Wt_day_mat[t_strich, :] = Wt_day
                 Wt_intraday_mat[t_strich, :] = Wt_intraday
-
                 einfluss_intraday[t, i] += (4 * np.sum(np.abs(Wt_day)) + np.sum(np.abs(Wt_intraday))) * (gamma ** (t_strich - t))
 
     weights = np.hstack([einfluss_day, einfluss_intraday])
     weights = np.round(weights, 0)
     return weights
-
-# Example usage (if data and functions are ready):
-# weights = badp_weights(T=5)
 
 if __name__ == "__main__":
     import sys
@@ -94,6 +103,5 @@ if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     
     weights = badp_weights(T=5)
-    # save array to '../../notebooks/udays_badpWeights.npy'
-    np.save('../../notebooks/udays_badpWeights.npy', weights)
+    np.save('../../notebooks/badpWeights.npy', weights)
     print("Weights saved successfully!")

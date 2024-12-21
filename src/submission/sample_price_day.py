@@ -23,12 +23,14 @@ def sample_price_day(Pt_day, t, Season):
     cov_P : np.ndarray
         The covariance matrix of day-ahead prices.
     """
-
-    # Load required data
-    beta_day_ahead_data = loadmat(f"Data/beta_day_ahead_{Season}.mat")
-    cov_day_data = loadmat(f"Data/cov_day_{Season}.mat")
-    DoW_data = loadmat(f"Data/DoW_{Season}.mat")
-
+    try:
+        # Load required data
+        beta_day_ahead_data = loadmat(f"Data/beta_day_ahead_{Season}.mat")
+        cov_day_data = loadmat(f"Data/cov_day_{Season}.mat")
+        DoW_data = loadmat(f"Data/DoW_{Season}.mat")
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Required data file is missing: {e.filename}")
+    
     # Extract variables from loaded data
     beta_day_ahead = beta_day_ahead_data["beta_day_ahead"]  # Shape depends on data
     cov_day = cov_day_data["cov_day"]  # Covariance matrix
@@ -48,7 +50,6 @@ def sample_price_day(Pt_day, t, Season):
     # Q = [1, DOW, Pt_day]
     Q = np.concatenate(([1], DOW, Pt_day))
 
-    # mu_P = Q * beta_day_ahead', in MATLAB Q is 1xN and beta_day_ahead' is NxM -> result is 1xM.
     # In Python: Q (1D array) and beta_day_ahead (2D array)
     # Need to ensure dimensions align. Q.shape: (1+7+(24*D),) and beta_day_ahead: let's assume it matches dimensions.
     mu_P = Q @ beta_day_ahead.T  # Result: 1D array of mu values

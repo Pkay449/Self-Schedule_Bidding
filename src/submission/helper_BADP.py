@@ -4,7 +4,7 @@ import warnings
 import matlab.engine
 import numpy as np
 from badp_weights_r import badp_weights
-# Local imports
+
 from sample_price_day import sample_price_day
 from sample_price_intraday import sample_price_intraday
 from scipy.io import loadmat

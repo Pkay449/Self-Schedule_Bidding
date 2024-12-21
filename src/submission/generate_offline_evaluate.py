@@ -2,7 +2,6 @@
 import numpy as np
 import pandas as pd
 from scipy.io import loadmat
-from scipy.stats import multivariate_normal
 from scipy.spatial import ConvexHull
 import os
 import warnings
@@ -11,7 +10,7 @@ import matlab.engine
 # Local imports
 from sample_price_day import sample_price_day
 from sample_price_intraday import sample_price_intraday
-from VRx_weights_pk import VRx_weights
+# from VRx_weights_pk import VRx_weights
 from badp_weights_r import badp_weights
 
 # Helper Functions
@@ -20,22 +19,9 @@ from helper import generate_scenarios, compute_weights, build_and_solve_intlinpr
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# Load Vt.npy, P_day_state.npy, P_intra_state.npy
-Vt = np.load("Results/Vt.npy")
-P_day_state = np.load("Results/P_day_state.npy")
-P_intra_state = np.load("Results/P_intra_state.npy")
-
 # =====================
-# Parameters
+# Constants and Parameters
 # =====================
-if False:  # Example if no arguments are given, just hardcode as in MATLAB
-    length_R = 5
-    N = 50
-    T = 3
-    M = 10
-    seed = 2
-    Season = "Summer"
-
 N = 50
 M = 10
 T = 30
@@ -54,7 +40,6 @@ t_ramp_turbine_down = 2 / 60
 c_grid_fee = 5 / 4
 Delta_ti = 0.25
 Delta_td = 1.0
-
 Q_mult = 1.2
 Q_fix = 3
 Q_start_pump = 15
@@ -62,12 +47,10 @@ Q_start_turbine = 15
 
 beta_pump = 0.9
 beta_turbine = 0.9
-
 x_max_pump = 10
 x_min_pump = 5
 x_max_turbine = 10
 x_min_turbine = 5
-
 R_vec = np.linspace(0, Rmax, length_R)
 x_vec = np.array([-x_max_turbine, 0, x_max_pump])
 
@@ -79,23 +62,55 @@ c_turbine_down = t_ramp_turbine_down / 2
 # =====================
 # Load data
 # =====================
-P_day_mat = loadmat(os.path.join("Data", f"P_day_{Season}.mat"))
-P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_{Season}.mat"))
+# Load Vt.npy, P_day_state.npy, P_intra_state.npy
+Vt = np.load("Results/Vt.npy")
+P_day_state = np.load("Results/P_day_state.npy")
+P_intra_state = np.load("Results/P_intra_state.npy")
 
-P_day_0 = P_day_mat["P_day_0"].flatten()
-P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
+# =====================
+# Load Required Data
+# =====================
+def load_price_data(season):
+    """
+    Load day-ahead and intraday price data for a given season.
+
+    Parameters
+    ----------
+    season : str
+        Season name (e.g., 'Summer').
+
+    Returns
+    -------
+    tuple
+        Day-ahead price data and intraday price data as numpy arrays.
+    """
+    try:
+        P_day_mat = loadmat(os.path.join("Data", f"P_day_{Season}.mat"))
+        P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_{Season}.mat"))
+        P_day_0 = P_day_mat["P_day_0"].flatten()
+        P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
+        return P_day_0, P_intraday_0 
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Required data file is missing: {e.filename}")
 
 
 def evaluate_optPolicy_2series():
+    """
+    Evaluate optimal policy for day-ahead and intraday decisions using forward simulation.
+
+    Returns
+    -------
+    float
+        The expected value (EV) of the policy.
+    """
     # Start MATLAB engine
     eng = matlab.engine.start_matlab()
-    
+    P_day_0, P_intraday_0 = load_price_data(Season)
+
     weights_D_value = badp_weights(T)
-
     intlinprog_options = eng.optimoptions("intlinprog", "display", "off")
-
     np.random.seed(seed + 1)
-    sample_P_day_all_fwd, sample_P_intraday_all_fwd, Wt_day_mat_fwd, Wt_intra_mat_fwd = (
+    _, _, Wt_day_mat_fwd, Wt_intra_mat_fwd = (
         generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed + 1)
     )
 
