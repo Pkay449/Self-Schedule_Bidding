@@ -7,3 +7,4 @@ quadprog==0.1.13
 scipy==1.14.1
 six==1.17.0
 tzdata==2024.2
+isort==5.13.2
