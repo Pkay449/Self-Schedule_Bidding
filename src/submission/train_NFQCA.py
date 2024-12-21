@@ -14,7 +14,7 @@ from functools import partial
 
 from config import SimulationParams
 from helper import build_constraints_batch
-from eval_learned_policy import eval_learned_policy
+from eval_NFQCA import eval_learned_policy
 # %%
 
 # Suppress warnings and set working directory
