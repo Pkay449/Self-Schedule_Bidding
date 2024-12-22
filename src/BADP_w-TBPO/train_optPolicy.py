@@ -24,7 +24,7 @@ import jax.numpy as jnp
 from jaxopt import OSQP
 
 
-def qp_projection(raw_actions, A, b, Aeq, beq, lb, ub):
+def qp_projection(raw_actions, A, b, Aeq, beq, lb, ub, solver, relaxation=10):
     """
     Solve the QP:
         minimize (1/2) * ||x - raw_actions||^2
@@ -32,38 +32,41 @@ def qp_projection(raw_actions, A, b, Aeq, beq, lb, ub):
                    Aeq x = beq,
                    lb <= x <= ub.
     """
-
-    # Problem dimension
-    dim = raw_actions.shape[0]
-
-    # QP data: P = I, q = - raw_actions
-    # Because the objective is 0.5 * (x - raw)^T (x - raw) = 0.5 x^T x - x^T raw + const
-    # So P = I, q = - raw.
+    # [Same as before, but use the passed solver]
+    dim = raw_actions.shape[-1]
     P = jnp.eye(dim)
     q = -raw_actions
-    
+
     # We have the problem in the form:
     # minimize 0.5 x^T P x + q^T x
     # subject to A x <= b,
     #            Aeq x = beq,
     #            lb <= x <= ub.
-    
+
     # A (num constraints x dim), b (num constraints)
     # [A, I, -I] x <= [b, ub, -lb]
     I = jnp.eye(dim)
-    Aineq = jnp.vstack([A, I, -I])
-    bineq = jnp.concatenate([b, ub, -lb])
+    # A = jnp.vstack([A, I, -I])
+    # b = jnp.concatenate([b, ub, -lb])
     
-    
-    # qp = OSQP()
-    # sol = qp.run(params_obj=(Q, c), params_eq=(A, b), params_ineq=(G, h)).params
-    osqp_solver = OSQP(
-        maxiter=100,      # Reduced from 1000 to 100
-        verbose=True     # Set to True for detailed logs
+    # A = b
+    # |A - b| <= relaxation
+    # A - b <= relaxation and A - b >= - relaxation
+    # A <= b + rel and A >= b - rel
+    # A <= b + rel and -A <= -b + rel
+
+    A = jnp.vstack([A, I, -I, Aeq, -Aeq])
+    b = jnp.concatenate([b, ub, -lb, beq + relaxation, -beq + relaxation])
+
+    # Solve the QP using the existing solver
+    solution = solver.run(
+        params_obj=(P, q),
+        # params_eq=(Aeq, beq),
+        params_ineq=(A, b),
     )
-    sol = osqp_solver.run(params_obj=(P, q), params_eq=(Aeq, beq), params_ineq=(Aineq, bineq)).params
-    print('solved')
-    return sol.primal
+
+    x_proj = solution.params.primal
+    return x_proj
 
 
 # %%
@@ -143,6 +146,7 @@ class PolicyDA(nn.Module):
     Policy network for the Day-Ahead scenario with bounded continuous actions.
     Actions are scaled via a sigmoid to fit within [lb, ub].
     """
+
     ub: float
     lb: float
     state_dim: int
@@ -165,12 +169,17 @@ class PolicyID(nn.Module):
     """
     Policy network for the Intraday scenario with QP-based projection to enforce constraints.
     """
+
     sim_params: SimulationParams  # Include simulation parameters
     lb: jnp.ndarray
     ub: jnp.ndarray
     state_dim: int
     action_dim: int
     hidden_dim: int = 256
+
+    def setup(self):
+        # Initialize the OSQP solver once to enable warm starting
+        self.osqp_solver = OSQP(maxiter=5,tol=1e-1)
 
     @nn.compact
     def __call__(self, state: jnp.ndarray) -> jnp.ndarray:
@@ -209,7 +218,7 @@ class PolicyID(nn.Module):
         # A, b, Aeq, beq: Shape (batch_size, num_constraints, action_dim)
         # lb, ub: Shape (batch_size, action_dim)
 
-        # 3. Define a batched projection function
+        # 3. Define a batched projection function (without JIT)
         def project_single(
             raw, A_sample, b_sample, Aeq_sample, beq_sample, lb_sample, ub_sample
         ):
@@ -221,19 +230,17 @@ class PolicyID(nn.Module):
                 beq=beq_sample,
                 lb=lb_sample,
                 ub=ub_sample,
-                # solver=self.osqp_solver,
+                solver=self.osqp_solver,
             )
 
         # 4. Vectorize the projection across the batch
         projected_actions = jax.vmap(project_single)(
             raw_actions, A, b, Aeq, beq, lb, ub
         )
-        
-        # Scale to [lb, ub]
-        actions = lb + (ub - lb) * nn.sigmoid(projected_actions)
-        
 
-        return actions
+        print("projected")
+
+        return projected_actions
 
 
 # ----------------------------------------------------
@@ -241,6 +248,7 @@ class PolicyID(nn.Module):
 # ----------------------------------------------------
 def mse_loss(pred: jnp.ndarray, target: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean((pred - target) ** 2)
+
 
 def soft_update(target_params, online_params, tau=0.005):
     return jax.tree_util.tree_map(
@@ -419,6 +427,7 @@ def update_policy_id(policy_id_params, policy_id_opt_state, q_id_params, s_id):
 
 
 from functools import partial
+
 
 @partial(jax.jit, static_argnums=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
 def update_policy_id_with_penalty(
