@@ -9,13 +9,13 @@ import warnings
 import matlab.engine
 
 # Local imports
-from sample_price_day import sample_price_day
-from sample_price_intraday import sample_price_intraday
-from VRx_weights_pk import VRx_weights
-from badp_weights_r import badp_weights
+from utils.sample_price_day import sample_price_day
+from utils.sample_price_intraday import sample_price_intraday
+from utils.VRx_weights_pk import VRx_weights
+from utils.badp_weights_r import badp_weights
 
 # Helper Functions
-from helper import generate_scenarios, compute_weights, build_and_solve_intlinprog
+from utils.helper import generate_scenarios, compute_weights, build_and_solve_intlinprog
 
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))

@@ -10,13 +10,13 @@ from tqdm import tqdm, trange
 
 
 # Local imports
-from sample_price_day import sample_price_day
-from sample_price_intraday import sample_price_intraday
-from VRx_weights_pk import VRx_weights
-from badp_weights_r import badp_weights
+from utils.sample_price_day import sample_price_day
+from utils.sample_price_intraday import sample_price_intraday
+from utils.VRx_weights_pk import VRx_weights
+from utils.badp_weights_r import badp_weights
 
 # Helper Functions
-from helper import (
+from utils.helper import (
     generate_scenarios,
     compute_weights,
     build_and_solve_intlinprog,
@@ -29,14 +29,6 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # =====================
 # Parameters
 # =====================
-if False:  # Example if no arguments are given, just hardcode as in MATLAB
-    length_R = 5
-    N = 50
-    T = 3
-    M = 10
-    seed = 2
-    Season = "Summer"
-
 N = 50
 M = 10
 T = 30
