@@ -128,7 +128,7 @@ def train_policy():
             else:
                 P_next_day = mu_day
             mu_intraday, cor_intraday = sample_price_intraday(
-                np.concatenate([P_next_day, P_day]), P_intraday, t_i, Season
+                np.concatenate([mu_day, P_day]), P_intraday, t_i, Season
             )
 
             P_day_next = np.concatenate([mu_day, P_day[:-24]])

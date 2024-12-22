@@ -20,6 +20,7 @@ from helper import generate_scenarios, compute_weights, build_and_solve_intlinpr
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# LOAD THE TRAINED MODEL WITH ITS TRAINED PRICES FOR STATE PIECE-WISE LINEARIZATION
 # Load Vt.npy, P_day_state.npy, P_intra_state.npy
 Vt = np.load("Results/Vt.npy")
 P_day_state = np.load("Results/P_day_state.npy")
@@ -28,16 +29,8 @@ P_intra_state = np.load("Results/P_intra_state.npy")
 # =====================
 # Parameters
 # =====================
-if False:  # Example if no arguments are given, just hardcode as in MATLAB
-    length_R = 5
-    N = 50
-    T = 3
-    M = 10
-    seed = 2
-    Season = "Summer"
-
 N = 50
-M = 10
+# M = 10
 T = 30
 Season = "Summer"
 length_R = 5
@@ -79,30 +72,31 @@ c_turbine_down = t_ramp_turbine_down / 2
 # =====================
 # Load data
 # =====================
-P_day_mat = loadmat(os.path.join("Data", f"P_day_{Season}.mat"))
-P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_{Season}.mat"))
 
-P_day_0 = P_day_mat["P_day_0"].flatten()
-P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
+import h5py
 
+# Load the DataFrame from HDF5
+with h5py.File("Results/test_dataset.h5", "r") as h5file:
+    loaded_data = {
+        col: np.array(h5file[col])
+        for col in h5file.keys()
+    }
+
+# Reconstruct as a numpy structured array instead of a DataFrame
+test_df = {col: loaded_data[col] for col in loaded_data}
+
+M = len(test_df['DA_day_t'])
+M
 # %%
 
 
-def evaluate_optPolicy_2series():
+def backtest(test_data):
     # Start MATLAB engine
     eng = matlab.engine.start_matlab()
-
-    # weights_D_value_mat = eng.badp_weights(T)
-    # weights_D_value = np.array(weights_D_value_mat)
 
     weights_D_value = badp_weights(T)
 
     intlinprog_options = eng.optimoptions("intlinprog", "display", "off")
-
-    np.random.seed(seed + 1)
-    sample_P_day_all_fwd, sample_P_intraday_all_fwd, Wt_day_mat_fwd, Wt_intra_mat_fwd = (
-        generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed + 1)
-    )
 
     R_0 = 0
     x0_0 = 0
@@ -118,7 +112,7 @@ def evaluate_optPolicy_2series():
     y_turbine_path = np.zeros((M, 96 * T))
     z_pump_path = np.zeros((M, 96 * T))
     z_turbine_path = np.zeros((M, 96 * T))
-
+    
     da_s = [] # R_Start , x_start, P_history = 1 + 1 + 24*7 + 96*7
     da_a = []
     da_r = []
@@ -129,16 +123,26 @@ def evaluate_optPolicy_2series():
     id_r = []
     id_s_prime = []
     
-    # REVERSE DATASET
+    
+    
+    data_DA = test_data['DA_day_t']
+    data_ID = test_data['ID_day_t']
+    data_DA_next = test_data['DA_day_t+1']
+    data_ID_next = test_data['ID_day_t+1']
+    
 
-    for m in range(M): # for each day in REAL DATASET:
+    for m in range(6,M): # for each day in REAL DATASET:
         R = R_0
         x0 = x0_0
-        P_day = P_day_0[: 24 * D].copy() # take most recent 7 days DA up to the day
-        P_intraday = P_intraday_0[: 96 * D].copy() # take most recent 7 days ID up to the day
+        # P_day = P_day_0[: 24 * D].copy() # take most recent 7 days DA up to the day
+        P_day = data_DA[m-6:m+1].ravel().copy() # until data [m]
+        # P_intraday = P_intraday_0[: 96 * D].copy() # take most recent 7 days ID up to the day
+        P_intraday = data_ID[m-6:m+1].ravel().copy() # until data [m]
 
-        P_day_sim = P_day_0[: 24 * D].copy()
-        P_intraday_sim = P_intraday_0[: 96 * D].copy()
+        # P_day_sim = P_day_0[: 24 * D].copy()
+        P_day_sim = P_day.copy()
+        # P_intraday_sim = P_intraday_0[: 96 * D].copy()
+        P_intraday_sim = P_intraday.copy()
 
         C = 0
         for t_i in range(T):
@@ -433,8 +437,11 @@ def evaluate_optPolicy_2series():
             xday_opt = x_opt[-25:-1].copy()
 
             da_a.append(xday_opt)
-
-            Wt_day = Wt_day_mat_fwd[m, t_i * 24 : (t_i + 1) * 24].copy() # THE NEXT DA day Prices
+            
+            # CHANGE
+            # Wt_day = Wt_day_mat_fwd[m, t_i * 24 : (t_i + 1) * 24].copy() # THE NEXT DA day Prices
+            # Wt_day = Wt_day_mat_fwd[m, t_i * 24 : (t_i + 1) * 24].copy() # THE NEXT DA day Prices
+            Wt_day = data_DA_next[m].ravel().copy()
             day_path = np.tile(Wt_day, (4, 1))
             P_day_path[m, t_i * 96 : (t_i + 1) * 96] = day_path.flatten()
 
@@ -599,7 +606,9 @@ def evaluate_optPolicy_2series():
             z_pump_path[m, t_i * 96 : (t_i + 1) * 96] = z_pump
             z_turbine_path[m, t_i * 96 : (t_i + 1) * 96] = z_turbine
 
-            Wt_intraday = Wt_intra_mat_fwd[m, t_i * 96 : (t_i + 1) * 96].copy()
+            # CHANGE
+            # Wt_intraday = Wt_intra_mat_fwd[m, t_i * 96 : (t_i + 1) * 96].copy()
+            Wt_intraday = data_ID_next[m].ravel().copy()
             P_intraday_path[m, t_i * 96 : (t_i + 1) * 96] = Wt_intraday
 
             # Update q_ ramps with realized intraday prices
@@ -655,7 +664,7 @@ def evaluate_optPolicy_2series():
         'next_state': da_s_prime
     })
 
-    df_da.to_pickle("Results/offline_dataset_day_ahead.pkl")
+    df_da.to_pickle("Results/BACKTEST_offline_dataset_day_ahead.pkl")
 
     df_id = pd.DataFrame({
         'state': id_s,
@@ -664,10 +673,18 @@ def evaluate_optPolicy_2series():
         'next_state': id_s_prime
     })
 
-    df_id.to_pickle("Results/offline_dataset_intraday.pkl")
+    df_id.to_pickle("Results/BACKTEST_offline_dataset_intraday.pkl")
 
     return EV
 # %%
 
-if __name__ == "__main__":
-    evaluate_optPolicy_2series()
+# if __name__ == "__main__":
+#     backtest(test_df)
+
+
+# %%
+
+backtest(test_df)
+# %%
+
+# %%
