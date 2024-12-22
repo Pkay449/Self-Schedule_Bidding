@@ -197,50 +197,12 @@ class PolicyID(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
-        raw_actions = nn.Dense(self.action_dim)(x)  # Shape: (batch_size, action_dim)
+        x = nn.Dense(self.hidden_dim)(x)
+        x = nn.relu(x)
+        
+        actions = nn.Dense(self.action_dim)(x)  # Shape: (batch_size, action_dim)
 
-        # 2. Build constraints for each sample in the batch
-        A, b, Aeq, beq, lb, ub = build_constraints_batch(
-            states=state,
-            Delta_ti=self.sim_params.Delta_ti,
-            beta_pump=self.sim_params.beta_pump,
-            beta_turbine=self.sim_params.beta_turbine,
-            c_pump_up=self.sim_params.c_pump_up,
-            c_pump_down=self.sim_params.c_pump_down,
-            c_turbine_up=self.sim_params.c_turbine_up,
-            c_turbine_down=self.sim_params.c_turbine_down,
-            x_min_pump=self.sim_params.x_min_pump,
-            x_max_pump=self.sim_params.x_max_pump,
-            x_min_turbine=self.sim_params.x_min_turbine,
-            x_max_turbine=self.sim_params.x_max_turbine,
-            Rmax=self.sim_params.Rmax,
-        )
-        # A, b, Aeq, beq: Shape (batch_size, num_constraints, action_dim)
-        # lb, ub: Shape (batch_size, action_dim)
-
-        # 3. Define a batched projection function (without JIT)
-        def project_single(
-            raw, A_sample, b_sample, Aeq_sample, beq_sample, lb_sample, ub_sample
-        ):
-            return qp_projection(
-                raw_actions=raw,
-                A=A_sample,
-                b=b_sample,
-                Aeq=Aeq_sample,
-                beq=beq_sample,
-                lb=lb_sample,
-                ub=ub_sample,
-                solver=self.osqp_solver,
-            )
-
-        # 4. Vectorize the projection across the batch
-        projected_actions = jax.vmap(project_single)(
-            raw_actions, A, b, Aeq, beq, lb, ub
-        )
-
-        print("projected")
-
-        return projected_actions
+        return actions
 
 
 # ----------------------------------------------------
@@ -316,7 +278,7 @@ q_da_target_params = q_da_params
 q_id_target_params = q_id_params
 
 # Optimizers
-learning_rate = 1e-3
+learning_rate = 1e-5
 q_da_opt = optax.adam(learning_rate)
 q_id_opt = optax.adam(learning_rate)
 policy_da_opt = optax.adam(learning_rate)
@@ -328,8 +290,8 @@ policy_da_opt_state = policy_da_opt.init(policy_da_params)
 policy_id_opt_state = policy_id_opt.init(policy_id_params)
 
 gamma = 0.99
-batch_size = 64
-num_epochs = 10
+batch_size = 256
+num_epochs = 20
 
 
 @jax.jit
@@ -472,24 +434,41 @@ def update_policy_id_with_penalty(
             x_max_turbine,
             Rmax,
         )
+        batch_size = A.shape[0]
+        action_size = a_id.shape[-1]
+        relaxation = 1e-1
+
+        # Create identity matrix with batch dimension
+        I = jnp.eye(action_size)
+        I = jnp.expand_dims(I, axis=0)  # Shape: (1, action_size, action_size)
+        I = jnp.tile(I, (batch_size, 1, 1))  # Shape: (batch_size, action_size, action_size)
+
+        # Concatenate all constraints
+        A = jnp.concatenate([A, I, -I, Aeq, -Aeq], axis=1)
+        b = jnp.concatenate([b, ub, -lb, beq + relaxation, -beq + relaxation], axis=1)
+        
+        # A = jnp.concatenate([A, I, -I], axis=1)
+        # b = jnp.concatenate([b, ub, -lb], axis=1)
+
 
         # Penalty for A * x <= b
         Ax = jnp.einsum("bkc,bc->bk", A, a_id)  # Shape: (batch_size, num_constraints)
         penalty_ineq = jnp.maximum(Ax - b, 0.0)
-        penalty_eq = jnp.abs(jnp.einsum("bkc,bc->bk", Aeq, a_id) - beq)
-        penalty_ub = jnp.maximum(a_id - ub, 0.0)
-        penalty_lb = jnp.maximum(lb - a_id, 0.0)
+        # penalty_eq = jnp.abs(jnp.einsum("bkc,bc->bk", Aeq, a_id) - beq)
+        # penalty_ub = jnp.maximum(a_id - ub, 0.0)
+        # penalty_lb = jnp.maximum(lb - a_id, 0.0)
 
         # Aggregate penalties
         penalty = (
             jnp.sum(penalty_ineq**2)
-            + jnp.sum(penalty_eq**2)
-            + jnp.sum(penalty_ub**2)
-            + jnp.sum(penalty_lb**2)
+            # + jnp.sum(penalty_eq**2)
+            # + jnp.sum(penalty_ub**2)
+            # + jnp.sum(penalty_lb**2)
         )
 
         # Total loss
-        return -jnp.mean(q_values) + 1e7 * penalty  # 1e3 is a hyperparameter
+        return -jnp.mean(q_values) + 1e20 * penalty  # 1e7 is a hyperparameter
+
 
     grads = jax.grad(loss_fn)(policy_id_params)
     updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
@@ -652,7 +631,8 @@ for ax, (title, array) in zip(axs.flat, data.items()):
 
 # Adjust layout
 plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.show()
+plt.savefig("Results/backtest_plots.png")
+
 
 
 # %%
