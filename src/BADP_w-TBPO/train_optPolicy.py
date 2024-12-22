@@ -1,4 +1,5 @@
-#%%
+# train.py
+# %%
 import os
 import warnings
 import pickle as pkl
@@ -15,16 +16,69 @@ from functools import partial
 from config import SimulationParams
 from helper import build_constraints_batch
 from eval_learned_policy import eval_learned_policy
+
+# %%
+
+import jax
+import jax.numpy as jnp
+from jaxopt import OSQP
+
+
+def qp_projection(raw_actions, A, b, Aeq, beq, lb, ub):
+    """
+    Solve the QP:
+        minimize (1/2) * ||x - raw_actions||^2
+        subject to A x <= b,
+                   Aeq x = beq,
+                   lb <= x <= ub.
+    """
+
+    # Problem dimension
+    dim = raw_actions.shape[0]
+
+    # QP data: P = I, q = - raw_actions
+    # Because the objective is 0.5 * (x - raw)^T (x - raw) = 0.5 x^T x - x^T raw + const
+    # So P = I, q = - raw.
+    P = jnp.eye(dim)
+    q = -raw_actions
+    
+    # We have the problem in the form:
+    # minimize 0.5 x^T P x + q^T x
+    # subject to A x <= b,
+    #            Aeq x = beq,
+    #            lb <= x <= ub.
+    
+    # A (num constraints x dim), b (num constraints)
+    # [A, I, -I] x <= [b, ub, -lb]
+    I = jnp.eye(dim)
+    Aineq = jnp.vstack([A, I, -I])
+    bineq = jnp.concatenate([b, ub, -lb])
+    
+    
+    # qp = OSQP()
+    # sol = qp.run(params_obj=(Q, c), params_eq=(A, b), params_ineq=(G, h)).params
+    osqp_solver = OSQP(
+        maxiter=100,      # Reduced from 1000 to 100
+        verbose=True     # Set to True for detailed logs
+    )
+    sol = osqp_solver.run(params_obj=(P, q), params_eq=(Aeq, beq), params_ineq=(Aineq, bineq)).params
+    print('solved')
+    return sol.primal
+
+
 # %%
 
 # Suppress warnings and set working directory
 warnings.filterwarnings("ignore")
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+
 # ----------------------------------------------------
 # Load Offline Data
 # ----------------------------------------------------
-def load_offline_data(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def load_offline_data(
+    path: str,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Loads offline dataset from a pickle file. The file is expected to contain a dictionary
     with keys: "state", "action", "reward", "next_state". Each value should be a Series
@@ -42,9 +96,11 @@ def load_offline_data(path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np
     return states, actions, rewards, next_states
 
 
-def batch_iter(data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
-               batch_size: int,
-               shuffle: bool = True):
+def batch_iter(
+    data: Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    batch_size: int,
+    shuffle: bool = True,
+):
     """
     Generator that yields mini-batches of data.
     """
@@ -66,6 +122,7 @@ class QNetwork(nn.Module):
     A simple Q-network that takes continuous states and actions as inputs
     and outputs a scalar Q-value.
     """
+
     state_dim: int
     action_dim: int
     hidden_dim: int = 256
@@ -106,9 +163,9 @@ class PolicyDA(nn.Module):
 
 class PolicyID(nn.Module):
     """
-    Policy network for the Intraday scenario. The action space is partly bounded and partly unbounded.
-    We apply a sigmoid scaling to the bounded parts and leave the unbounded parts as is.
+    Policy network for the Intraday scenario with QP-based projection to enforce constraints.
     """
+    sim_params: SimulationParams  # Include simulation parameters
     lb: jnp.ndarray
     ub: jnp.ndarray
     state_dim: int
@@ -117,16 +174,66 @@ class PolicyID(nn.Module):
 
     @nn.compact
     def __call__(self, state: jnp.ndarray) -> jnp.ndarray:
+        """
+        Forward pass of the PolicyID network with QP projection.
+
+        Args:
+            state: Input state, shape (batch_size, state_dim)
+
+        Returns:
+            Projected actions, shape (batch_size, action_dim)
+        """
+        # 1. Neural Network to generate raw actions
         x = nn.Dense(self.hidden_dim)(state)
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
-        raw_actions = nn.Dense(self.action_dim)(x)
+        raw_actions = nn.Dense(self.action_dim)(x)  # Shape: (batch_size, action_dim)
 
-        # Define masks for bounded and unbounded actions
-        scaled_actions = self.lb + (self.ub - self.lb) * nn.sigmoid(raw_actions)
-        # final_actions = raw_actions
-        return scaled_actions
+        # 2. Build constraints for each sample in the batch
+        A, b, Aeq, beq, lb, ub = build_constraints_batch(
+            states=state,
+            Delta_ti=self.sim_params.Delta_ti,
+            beta_pump=self.sim_params.beta_pump,
+            beta_turbine=self.sim_params.beta_turbine,
+            c_pump_up=self.sim_params.c_pump_up,
+            c_pump_down=self.sim_params.c_pump_down,
+            c_turbine_up=self.sim_params.c_turbine_up,
+            c_turbine_down=self.sim_params.c_turbine_down,
+            x_min_pump=self.sim_params.x_min_pump,
+            x_max_pump=self.sim_params.x_max_pump,
+            x_min_turbine=self.sim_params.x_min_turbine,
+            x_max_turbine=self.sim_params.x_max_turbine,
+            Rmax=self.sim_params.Rmax,
+        )
+        # A, b, Aeq, beq: Shape (batch_size, num_constraints, action_dim)
+        # lb, ub: Shape (batch_size, action_dim)
+
+        # 3. Define a batched projection function
+        def project_single(
+            raw, A_sample, b_sample, Aeq_sample, beq_sample, lb_sample, ub_sample
+        ):
+            return qp_projection(
+                raw_actions=raw,
+                A=A_sample,
+                b=b_sample,
+                Aeq=Aeq_sample,
+                beq=beq_sample,
+                lb=lb_sample,
+                ub=ub_sample,
+                # solver=self.osqp_solver,
+            )
+
+        # 4. Vectorize the projection across the batch
+        projected_actions = jax.vmap(project_single)(
+            raw_actions, A, b, Aeq, beq, lb, ub
+        )
+        
+        # Scale to [lb, ub]
+        actions = lb + (ub - lb) * nn.sigmoid(projected_actions)
+        
+
+        return actions
 
 
 # ----------------------------------------------------
@@ -136,8 +243,9 @@ def mse_loss(pred: jnp.ndarray, target: jnp.ndarray) -> jnp.ndarray:
     return jnp.mean((pred - target) ** 2)
 
 def soft_update(target_params, online_params, tau=0.005):
-    return jax.tree_util.tree_map(lambda tp, op: tp * (1 - tau) + op * tau,
-                                  target_params, online_params)
+    return jax.tree_util.tree_map(
+        lambda tp, op: tp * (1 - tau) + op * tau, target_params, online_params
+    )
 
 
 # ----------------------------------------------------
@@ -153,17 +261,21 @@ id_data = load_offline_data("Results/offline_dataset_intraday.pkl")
 NEG_INF = -1e6
 POS_INF = 1e6
 
-lb_id = np.concatenate([
-    np.zeros(96),                # bounded
-    NEG_INF * np.ones(96),      # unbounded (lower bound ~ -inf)
-    np.zeros(96*10)                # bounded
-]).astype(np.float32)
+lb_id = np.concatenate(
+    [
+        np.zeros(96),  # bounded
+        NEG_INF * np.ones(96),  # unbounded (lower bound ~ -inf)
+        np.zeros(96 * 10),  # bounded
+    ]
+).astype(np.float32)
 
-ub_id = np.concatenate([
-    sim_params.Rmax * np.ones(96),  # bounded
-    POS_INF * np.ones(96 * 7),               # unbounded (upper bound ~ inf)
-    np.ones(96 * 4)                          # bounded
-]).astype(np.float32)
+ub_id = np.concatenate(
+    [
+        sim_params.Rmax * np.ones(96),  # bounded
+        POS_INF * np.ones(96 * 7),  # unbounded (upper bound ~ inf)
+        np.ones(96 * 4),  # bounded
+    ]
+).astype(np.float32)
 
 # Initialize models
 key = jax.random.PRNGKey(0)
@@ -171,10 +283,16 @@ da_key, id_key, pda_key, pid_key = jax.random.split(key, 4)
 
 q_da_model = QNetwork(state_dim=842, action_dim=24)
 q_id_model = QNetwork(state_dim=890, action_dim=1152)
-policy_da_model = PolicyDA(ub=sim_params.x_max_pump, lb=-sim_params.x_max_turbine,
-                           state_dim=842, action_dim=24)
-policy_id_model = PolicyID(lb=jnp.array(lb_id), ub=jnp.array(ub_id),
-                           state_dim=890, action_dim=1152)
+policy_da_model = PolicyDA(
+    ub=sim_params.x_max_pump, lb=-sim_params.x_max_turbine, state_dim=842, action_dim=24
+)
+policy_id_model = PolicyID(
+    sim_params=sim_params,
+    lb=jnp.array(lb_id),
+    ub=jnp.array(ub_id),
+    state_dim=890,
+    action_dim=1152,
+)
 
 dummy_s_da = jnp.ones((1, 842))
 dummy_a_da = jnp.ones((1, 24), dtype=jnp.float32)
@@ -207,8 +325,17 @@ num_epochs = 10
 
 
 @jax.jit
-def update_q_id(q_id_params, q_id_opt_state, q_id_target_params, q_da_target_params,
-                policy_da_params, s_id, a_id, r_id, s_da_next):
+def update_q_id(
+    q_id_params,
+    q_id_opt_state,
+    q_id_target_params,
+    q_da_target_params,
+    policy_da_params,
+    s_id,
+    a_id,
+    r_id,
+    s_da_next,
+):
     """
     Update Q_ID by fitting to the Bellman target:
     Q_ID(s,a) -> r_ID + gamma * Q_DA(s', policy_DA(s'))
@@ -228,8 +355,17 @@ def update_q_id(q_id_params, q_id_opt_state, q_id_target_params, q_da_target_par
 
 
 @jax.jit
-def update_q_da(q_da_params, q_da_opt_state, q_da_target_params, q_id_target_params,
-                policy_id_params, s_da, a_da, r_da, s_id_next):
+def update_q_da(
+    q_da_params,
+    q_da_opt_state,
+    q_da_target_params,
+    q_id_target_params,
+    policy_id_params,
+    s_da,
+    a_da,
+    r_da,
+    s_id_next,
+):
     """
     Update Q_DA by fitting to the Bellman target:
     Q_DA(s,a) -> r_DA + gamma * Q_ID(s', policy_ID(s'))
@@ -253,6 +389,7 @@ def update_policy_da(policy_da_params, policy_da_opt_state, q_da_params, s_da):
     """
     Update Policy_DA by maximizing Q_DA(s, policy_DA(s)).
     """
+
     def loss_fn(params):
         a_da = policy_da_model.apply(params, s_da)
         q_values = q_da_model.apply(q_da_params, s_da, a_da)
@@ -269,6 +406,7 @@ def update_policy_id(policy_id_params, policy_id_opt_state, q_id_params, s_id):
     """
     Update Policy_ID by maximizing Q_ID(s, policy_ID(s)).
     """
+
     def loss_fn(params):
         a_id = policy_id_model.apply(params, s_id)
         q_values = q_id_model.apply(q_id_params, s_id, a_id)
@@ -284,15 +422,27 @@ from functools import partial
 
 @partial(jax.jit, static_argnums=(4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15))
 def update_policy_id_with_penalty(
-    policy_id_params, policy_id_opt_state, q_id_params,
-    states_id, Delta_ti, beta_pump, beta_turbine,
-    c_pump_up, c_pump_down, c_turbine_up, c_turbine_down,
-    x_min_pump, x_max_pump, x_min_turbine, x_max_turbine,
-    Rmax
+    policy_id_params,
+    policy_id_opt_state,
+    q_id_params,
+    states_id,
+    Delta_ti,
+    beta_pump,
+    beta_turbine,
+    c_pump_up,
+    c_pump_down,
+    c_turbine_up,
+    c_turbine_down,
+    x_min_pump,
+    x_max_pump,
+    x_min_turbine,
+    x_max_turbine,
+    Rmax,
 ):
     """
     Update Policy_ID by maximizing Q_ID(s, policy_ID(s)) with penalty for constraint violations.
     """
+
     def loss_fn(params):
         a_id = policy_id_model.apply(params, states_id)
         q_values = q_id_model.apply(q_id_params, states_id, a_id)
@@ -300,27 +450,33 @@ def update_policy_id_with_penalty(
         # Compute constraints
         A, b, Aeq, beq, lb, ub = build_constraints_batch(
             states_id,
-            Delta_ti, beta_pump, beta_turbine,
-            c_pump_up, c_pump_down,
-            c_turbine_up, c_turbine_down,
-            x_min_pump, x_max_pump,
-            x_min_turbine, x_max_turbine,
-            Rmax
+            Delta_ti,
+            beta_pump,
+            beta_turbine,
+            c_pump_up,
+            c_pump_down,
+            c_turbine_up,
+            c_turbine_down,
+            x_min_pump,
+            x_max_pump,
+            x_min_turbine,
+            x_max_turbine,
+            Rmax,
         )
 
         # Penalty for A * x <= b
-        Ax = jnp.einsum('bkc,bc->bk', A, a_id)  # Shape: (batch_size, num_constraints)
+        Ax = jnp.einsum("bkc,bc->bk", A, a_id)  # Shape: (batch_size, num_constraints)
         penalty_ineq = jnp.maximum(Ax - b, 0.0)
-        penalty_eq = jnp.abs(jnp.einsum('bkc,bc->bk', Aeq, a_id) - beq)
+        penalty_eq = jnp.abs(jnp.einsum("bkc,bc->bk", Aeq, a_id) - beq)
         penalty_ub = jnp.maximum(a_id - ub, 0.0)
         penalty_lb = jnp.maximum(lb - a_id, 0.0)
 
         # Aggregate penalties
         penalty = (
-            jnp.sum(penalty_ineq ** 2) +
-            jnp.sum(penalty_eq ** 2) +
-            jnp.sum(penalty_ub ** 2) +
-            jnp.sum(penalty_lb ** 2)
+            jnp.sum(penalty_ineq**2)
+            + jnp.sum(penalty_eq**2)
+            + jnp.sum(penalty_ub**2)
+            + jnp.sum(penalty_lb**2)
         )
 
         # Total loss
@@ -330,9 +486,6 @@ def update_policy_id_with_penalty(
     updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
     policy_id_params_new = optax.apply_updates(policy_id_params, updates)
     return policy_id_params_new, policy_id_opt_state_new
-
-
-
 
 
 # ----------------------------------------------------
@@ -348,8 +501,15 @@ for epoch in range(num_epochs):
 
         # Update Q_ID
         q_id_params, q_id_opt_state, _ = update_q_id(
-            q_id_params, q_id_opt_state, q_id_target_params, q_da_target_params,
-            policy_da_params, s_id, a_id, r_id, s_da_next
+            q_id_params,
+            q_id_opt_state,
+            q_id_target_params,
+            q_da_target_params,
+            policy_da_params,
+            s_id,
+            a_id,
+            r_id,
+            s_da_next,
         )
 
         # Update Policy_ID with penalties
@@ -369,7 +529,7 @@ for epoch in range(num_epochs):
             sim_params.x_max_pump,
             sim_params.x_min_turbine,
             sim_params.x_max_turbine,
-            sim_params.Rmax
+            sim_params.Rmax,
         )
 
     # Train Q_DA and Policy_DA
@@ -381,8 +541,15 @@ for epoch in range(num_epochs):
 
         # Update Q_DA
         q_da_params, q_da_opt_state, _ = update_q_da(
-            q_da_params, q_da_opt_state, q_da_target_params, q_id_target_params,
-            policy_id_params, s_da, a_da, r_da, s_id_next
+            q_da_params,
+            q_da_opt_state,
+            q_da_target_params,
+            q_id_target_params,
+            policy_id_params,
+            s_da,
+            a_da,
+            r_da,
+            s_id_next,
         )
 
         # Update Policy_DA
@@ -404,22 +571,13 @@ for epoch in range(num_epochs):
 def sample_action_da(params, s_da_example: jnp.ndarray) -> jnp.ndarray:
     return policy_da_model.apply(params, s_da_example)
 
+
 def sample_action_id(policy_id_params, states_id_example, config):
     raw_actions = policy_id_model.apply(policy_id_params, states_id_example)
     # Optionally, apply projection or clipping if needed
     # For penalty methods, this is usually not required
     return raw_actions
 
-# Example inference
-s_da_example = jnp.ones((1, 842), dtype=jnp.float32)
-da_action = sample_action_da(policy_da_params, s_da_example)
-
-s_id_example = jnp.ones((1, 890), dtype=jnp.float32)
-id_action = sample_action_id(policy_id_params, s_id_example, sim_params)
-
-print("Sample DA action:", da_action)
-print("Sample ID action:", id_action)
-
 
 # Example inference
 s_da_example = jnp.ones((1, 842), dtype=jnp.float32)
@@ -430,10 +588,24 @@ id_action = sample_action_id(policy_id_params, s_id_example, sim_params)
 
 print("Sample DA action:", da_action)
 print("Sample ID action:", id_action)
-eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, policy_da_params)
+
+
+# Example inference
+s_da_example = jnp.ones((1, 842), dtype=jnp.float32)
+da_action = sample_action_da(policy_da_params, s_da_example)
+
+s_id_example = jnp.ones((1, 890), dtype=jnp.float32)
+id_action = sample_action_id(policy_id_params, s_id_example, sim_params)
+
+print("Sample DA action:", da_action)
+print("Sample ID action:", id_action)
+eval_learned_policy(
+    policy_id_model, policy_da_model, policy_id_params, policy_da_params
+)
 
 # plot paths
 import matplotlib.pyplot as plt
+
 R_path = np.load("Results/BACKTEST_R_path.npy").ravel()
 x_intraday_path = np.load("Results/BACKTEST_x_intraday_path.npy").ravel()
 P_day_path = np.load("Results/BACKTEST_P_day_path.npy").ravel()
