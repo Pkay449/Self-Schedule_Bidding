@@ -324,7 +324,7 @@ def update_policy_id_with_penalty(
         )
 
         # Total loss
-        return -jnp.mean(q_values) + 1e3 * penalty  # 1e3 is a hyperparameter
+        return -jnp.mean(q_values) + 1e7 * penalty  # 1e3 is a hyperparameter
 
     grads = jax.grad(loss_fn)(policy_id_params)
     updates, policy_id_opt_state_new = policy_id_opt.update(grads, policy_id_opt_state)
@@ -431,6 +431,47 @@ id_action = sample_action_id(policy_id_params, s_id_example, sim_params)
 print("Sample DA action:", da_action)
 print("Sample ID action:", id_action)
 eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, policy_da_params)
+
+# plot paths
+import matplotlib.pyplot as plt
+R_path = np.load("Results/BACKTEST_R_path.npy").ravel()
+x_intraday_path = np.load("Results/BACKTEST_x_intraday_path.npy").ravel()
+P_day_path = np.load("Results/BACKTEST_P_day_path.npy").ravel()
+P_intraday_path = np.load("Results/BACKTEST_P_intraday_path.npy").ravel()
+x_pump_path = np.load("Results/BACKTEST_x_pump_path.npy").ravel()
+x_turbine_path = np.load("Results/BACKTEST_x_turbine_path.npy").ravel()
+y_pump_path = np.load("Results/BACKTEST_y_pump_path.npy").ravel()
+y_turbine_path = np.load("Results/BACKTEST_y_turbine_path.npy").ravel()
+z_pump_path = np.load("Results/BACKTEST_z_pump_path.npy").ravel()
+
+# Create a figure with multiple subplots
+fig, axs = plt.subplots(3, 3, figsize=(15, 10))
+fig.suptitle("Backtest Data Plots", fontsize=16)
+
+# Plot each array in a subplot
+data = {
+    "R Path": R_path,
+    "x Intraday Path": x_intraday_path,
+    "P Day Path": P_day_path,
+    "P Intraday Path": P_intraday_path,
+    "x Pump Path": x_pump_path,
+    "x Turbine Path": x_turbine_path,
+    "y Pump Path": y_pump_path,
+    "y Turbine Path": y_turbine_path,
+    "z Pump Path": z_pump_path,
+}
+
+# Iterate through data and subplots
+for ax, (title, array) in zip(axs.flat, data.items()):
+    ax.plot(array)
+    ax.set_title(title)
+    ax.set_xlabel("Time Steps")
+    ax.set_ylabel("Values")
+    ax.grid(True)
+
+# Adjust layout
+plt.tight_layout(rect=[0, 0, 1, 0.96])
+plt.show()
 
 
 # %%
