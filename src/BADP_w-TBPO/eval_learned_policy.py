@@ -33,8 +33,20 @@ def generate_scenarios(N, T, D, P_day_0, P_intraday_0, Season, seed=None):
             Wt_intra_mat[n, t_i*96:(t_i+1)*96] = Wt_intraday
     return sample_P_day_all, sample_P_intraday_all, Wt_day_mat, Wt_intra_mat
 
+def reverse_price_series(price_series, granularity=24):
+    # Reshape into a 2D array where each row represents a day
+    price_series_reshaped = price_series.reshape(-1, granularity)
+
+    # Reverse the order of days
+    price_series_reversed = price_series_reshaped[::-1]
+
+    # Flatten back into a 1D array
+    res = price_series_reversed.flatten()
+
+    return res
+
 def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, policy_da_params):
-    M=10
+    M=1
     T=30
     D=7
     Season='Summer'
@@ -56,13 +68,13 @@ def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, poli
     seed=2
     np.random.seed(seed)
 
-    P_day_mat = loadmat(os.path.join('Data', f'P_day_{Season}.mat'))
-    P_intraday_mat = loadmat(os.path.join('Data', f'P_intraday_{Season}.mat'))
+    P_day_mat = loadmat(os.path.join("Data", f"P_day_ahead_test_all.mat"))
+    P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_test_all.mat"))
 
     P_day_0 = P_day_mat['P_day_0'].flatten()
     P_intraday_0 = P_intraday_mat['P_intraday_0'].flatten()
 
-    sample_P_day_all_fwd, sample_P_intraday_all_fwd, Wt_day_mat_fwd, Wt_intra_mat_fwd = generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed)
+    # sample_P_day_all_fwd, sample_P_intraday_all_fwd, Wt_day_mat_fwd, Wt_intra_mat_fwd = generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed)
 
     R_0=0
     x0_0=0
@@ -79,15 +91,19 @@ def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, poli
     z_pump_path=np.zeros((M,96*T))
     z_turbine_path=np.zeros((M,96*T))
 
+    # Enviroment trackers
+    storage_track = []
+    storage_track.append(R_0)
+
     for m in range(M):
         print(f'Running for m={m}')
         R = R_0
         x0 = x0_0
-        P_day = P_day_0[:24*D].copy()
-        P_intraday = P_intraday_0[:96*D].copy()
+        P_day = P_day_0[: 24 * D].copy()
+        P_intraday = P_intraday_0[: 96 * D].copy()
 
-        P_day_sim = P_day_0[:24*D].copy()
-        P_intraday_sim = P_intraday_0[:96*D].copy()
+        P_day_sim = P_day_0[: 24 * D].copy()
+        P_intraday_sim = P_intraday_0[: 96 * D].copy()
 
         C=0
         for t_i in range(T):
@@ -105,18 +121,17 @@ def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, poli
             # Get day ahead initial state
             da_state = np.concatenate([[R], [x0], P_day, P_intraday])
 
-            Wt_day=Wt_day_mat_fwd[m,t_i*24:(t_i+1)*24].copy()
+            Wt_day = P_day_0[t_i * 24 : (t_i + 1) * 24].copy()
+            day_path = np.tile(Wt_day, (4, 1))
+            P_day_path[m, t_i * 96 : (t_i + 1) * 96] = day_path.flatten()
 
             # Get day ahead action from corresponding policy model
             xday_opt = policy_da_model.apply(policy_da_params, da_state)
 
-            # # Get initial state for intraday
-            # id_state = np.concatenate([da_state, xday_opt, Wt_day])
-
-            # # Get intraday action from corresponding policy model
-            # x_opt2 = intraday_model.predict(id_state)
+            # Get initial state for intraday
             id_state = np.concatenate([da_state, xday_opt, Wt_day])
 
+            # Get intraday action from corresponding policy model
             xid_opt = policy_id_model.apply(policy_id_params, id_state)
 
             # Extract results from x_opt2
@@ -135,7 +150,17 @@ def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, poli
             z_pump = xid_opt[10*96:11*96].copy()
             z_turbine = xid_opt[11*96:12*96].copy()
 
-            Wt_intraday = Wt_intra_mat_fwd[m, t_i*96:(t_i+1)*96].copy()
+            # Update paths
+            R_path[m, t_i * 96 : (t_i + 1) * 96] = R_opt
+            x_intraday_path[m, t_i * 96 : (t_i + 1) * 96] = xhq_opt
+            x_pump_path[m, t_i * 96 : (t_i + 1) * 96] = x_pump
+            x_turbine_path[m, t_i * 96 : (t_i + 1) * 96] = x_turbine
+            y_pump_path[m, t_i * 96 : (t_i + 1) * 96] = y_pump
+            y_turbine_path[m, t_i * 96 : (t_i + 1) * 96] = y_turbine
+            z_pump_path[m, t_i * 96 : (t_i + 1) * 96] = z_pump
+            z_turbine_path[m, t_i * 96 : (t_i + 1) * 96] = z_turbine
+
+            Wt_intraday = P_intraday_0[t_i * 96 : (t_i + 1) * 96].copy()
             P_intraday_path[m, t_i*96:(t_i+1)*96] = Wt_intraday
 
             # Update q_ ramps with realized intraday prices
@@ -159,7 +184,32 @@ def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, poli
                 - np.dot(q_turbine_up, Delta_turbine_up) + np.dot(q_turbine_down, Delta_turbine_down) \
                 - np.sum(z_pump)*Q_start_pump - np.sum(z_turbine)*Q_start_turbine
 
+            # UPDATE TRACKERS
+            storage_track.append(R)
+
         V[m] = C
 
     EV = np.mean(V)
     print(EV)
+
+    # print backtest statistics :
+    print("Backtest Statistics:")
+    print("Mean Value: ", np.mean(V))
+    print("Standard Deviation: ", np.std(V))
+    print("Total Reward: ", np.sum(V))
+
+    # save trackers
+    # storage_track
+    np.save("Results/BACKTEST_storage_track.npy", storage_track)
+
+    # Save paths
+    np.save("Results/BACKTEST_R_path.npy", R_path)
+    np.save("Results/BACKTEST_x_intraday_path.npy", x_intraday_path)
+    np.save("Results/BACKTEST_P_day_path.npy", P_day_path)
+    np.save("Results/BACKTEST_P_intraday_path.npy", P_intraday_path)
+    np.save("Results/BACKTEST_x_pump_path.npy", x_pump_path)
+    np.save("Results/BACKTEST_x_turbine_path.npy", x_turbine_path)
+    np.save("Results/BACKTEST_y_pump_path.npy", y_pump_path)
+    np.save("Results/BACKTEST_y_turbine_path.npy", y_turbine_path)
+    np.save("Results/BACKTEST_z_pump_path.npy", z_pump_path)
+    np.save("Results/BACKTEST_z_turbine_path.npy", z_turbine_path)

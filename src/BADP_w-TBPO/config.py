@@ -1,5 +1,5 @@
 # config.py
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 @dataclass
@@ -37,8 +37,8 @@ class SimulationParams:
     x_min_turbine: float = 5.0
 
     # Derived parameters
-    R_vec: np.ndarray = np.linspace(0, 100.0, length_R)
-    x_vec: np.ndarray = np.array([-x_max_turbine, 0, x_max_pump])
+    R_vec: np.ndarray = field(default_factory=lambda: np.linspace(0, 100.0, 5))
+    x_vec: np.ndarray = field(default_factory=lambda: np.array([-10, 0, 10]))
 
     c_pump_up: float = 2 / 60 / 2
     c_pump_down: float = 2 / 60 / 2

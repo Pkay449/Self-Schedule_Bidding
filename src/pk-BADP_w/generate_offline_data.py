@@ -28,9 +28,16 @@ P_intra_state = np.load("Results/P_intra_state.npy")
 # =====================
 # Parameters
 # =====================
+if False:  # Example if no arguments are given, just hardcode as in MATLAB
+    length_R = 5
+    N = 50
+    T = 3
+    M = 10
+    seed = 2
+    Season = "Summer"
 
 N = 50
-M = 1
+M = 10
 T = 30
 Season = "Summer"
 length_R = 5
@@ -72,28 +79,16 @@ c_turbine_down = t_ramp_turbine_down / 2
 # =====================
 # Load data
 # =====================
-P_day_mat = loadmat(os.path.join("Data", f"P_day_ahead_test_all.mat"))
-P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_test_all.mat"))
+P_day_mat = loadmat(os.path.join("Data", f"P_day_{Season}.mat"))
+P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_{Season}.mat"))
 
 P_day_0 = P_day_mat["P_day_0"].flatten()
 P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
 
-#%%
-def reverse_price_series(price_series, granularity=24):
-    # Reshape into a 2D array where each row represents a day
-    price_series_reshaped = price_series.reshape(-1, granularity)
+# %%
 
-    # Reverse the order of days
-    price_series_reversed = price_series_reshaped[::-1]
 
-    # Flatten back into a 1D array
-    res = price_series_reversed.flatten()
-
-    return res
-
-#%%
-
-def evaluate_policy():
+def generate_offline_data():
     # Start MATLAB engine
     eng = matlab.engine.start_matlab()
 
@@ -103,6 +98,11 @@ def evaluate_policy():
     weights_D_value = badp_weights(T)
 
     intlinprog_options = eng.optimoptions("intlinprog", "display", "off")
+
+    np.random.seed(seed + 1)
+    sample_P_day_all_fwd, sample_P_intraday_all_fwd, Wt_day_mat_fwd, Wt_intra_mat_fwd = (
+        generate_scenarios(M, T, D, P_day_0, P_intraday_0, Season, seed=seed + 1)
+    )
 
     R_0 = 0
     x0_0 = 0
@@ -129,21 +129,20 @@ def evaluate_policy():
     id_r = []
     id_s_prime = []
 
-    # Enviroment trackers
-    storage_track = []
-    storage_track.append(R_0)
+    # REVERSE DATASET
 
-    for m in range(M):
+    for m in range(M): # for each day in REAL DATASET:
         R = R_0
         x0 = x0_0
-        P_day = reverse_price_series(P_day_0[: 24 * D].copy(), 24)
-        P_intraday = reverse_price_series(P_intraday_0[: 96 * D].copy(), 96)
+        P_day = P_day_0[: 24 * D].copy() # take most recent 7 days DA up to the day
+        P_intraday = P_intraday_0[: 96 * D].copy() # take most recent 7 days ID up to the day
 
-        P_day_sim = reverse_price_series(P_day_0[: 24 * D].copy(), 24)
-        P_intraday_sim = reverse_price_series(P_intraday_0[: 96 * D].copy(), 96)
+        P_day_sim = P_day_0[: 24 * D].copy()
+        P_intraday_sim = P_intraday_0[: 96 * D].copy()
 
         C = 0
         for t_i in range(T):
+
             mu_day, _ = sample_price_day(P_day_sim, t_i, Season)
             mu_intraday, _ = sample_price_intraday(
                 np.concatenate([mu_day, P_day_sim]), P_intraday_sim, t_i, Season
@@ -435,7 +434,7 @@ def evaluate_policy():
 
             da_a.append(xday_opt)
 
-            Wt_day = P_day_0[t_i * 24 : (t_i + 1) * 24].copy()
+            Wt_day = Wt_day_mat_fwd[m, t_i * 24 : (t_i + 1) * 24].copy() # THE NEXT DA day Prices
             day_path = np.tile(Wt_day, (4, 1))
             P_day_path[m, t_i * 96 : (t_i + 1) * 96] = day_path.flatten()
 
@@ -445,12 +444,12 @@ def evaluate_policy():
                 np.concatenate([Wt_day, P_day_sim]), P_intraday_sim, t_i, Season
             )
 
-            P_day_next = np.concatenate([Wt_day, P_day[:-24].copy()])
+            P_day_next = np.concatenate([Wt_day, P_day[:-24].copy()]) # Remove oldest day from DA price series
             da_next_state = np.concatenate([da_state, xday_opt, Wt_day])
 
             da_s_prime.append(da_next_state)
             id_s.append(da_next_state)
-            P_intraday_next = np.concatenate([mu_intraday, P_intraday[:-96].copy()])
+            P_intraday_next = np.concatenate([mu_intraday, P_intraday[:-96].copy()]) # Remove oldest day from ID price series
 
             # Now solve the second MILP (intraday) with xday_opt as bounds
             # Build f again for intraday stage
@@ -600,7 +599,7 @@ def evaluate_policy():
             z_pump_path[m, t_i * 96 : (t_i + 1) * 96] = z_pump
             z_turbine_path[m, t_i * 96 : (t_i + 1) * 96] = z_turbine
 
-            Wt_intraday = P_intraday_0[t_i * 96 : (t_i + 1) * 96].copy()
+            Wt_intraday = Wt_intra_mat_fwd[m, t_i * 96 : (t_i + 1) * 96].copy()
             P_intraday_path[m, t_i * 96 : (t_i + 1) * 96] = Wt_intraday
 
             # Update q_ ramps with realized intraday prices
@@ -642,78 +641,33 @@ def evaluate_policy():
                 - np.sum(z_turbine) * Q_start_turbine
             )
 
-            # UPDATE TRACKERS
-            storage_track.append(R)
-
         V[m] = C
 
     EV = np.mean(V)
     print(EV)
 
-    # print backtest statistics :
-    print("Backtest Statistics:")
-    print("Mean Value: ", np.mean(V))
-    print("Standard Deviation: ", np.std(V))
-    print("Total Reward: ", np.sum(V))
+    # Save offline dataset as pickle
 
-    # save trackers
-    # storage_track
-    np.save("Results/BACKTEST_storage_track.npy", storage_track)
+    df_da = pd.DataFrame({
+        'state': da_s,
+        'action': da_a,
+        'reward': da_r,
+        'next_state': da_s_prime
+    })
 
-    # Save paths
-    np.save("Results/BACKTEST_R_path.npy", R_path)
-    np.save("Results/BACKTEST_x_intraday_path.npy", x_intraday_path)
-    np.save("Results/BACKTEST_P_day_path.npy", P_day_path)
-    np.save("Results/BACKTEST_P_intraday_path.npy", P_intraday_path)
-    np.save("Results/BACKTEST_x_pump_path.npy", x_pump_path)
-    np.save("Results/BACKTEST_x_turbine_path.npy", x_turbine_path)
-    np.save("Results/BACKTEST_y_pump_path.npy", y_pump_path)
-    np.save("Results/BACKTEST_y_turbine_path.npy", y_turbine_path)
-    np.save("Results/BACKTEST_z_pump_path.npy", z_pump_path)
-    np.save("Results/BACKTEST_z_turbine_path.npy", z_turbine_path)
+    df_da.to_pickle("Results/offline_dataset_day_ahead.pkl")
+
+    df_id = pd.DataFrame({
+        'state': id_s,
+        'action': id_a,
+        'reward': id_r,
+        'next_state': id_s_prime
+    })
+
+    df_id.to_pickle("Results/offline_dataset_intraday.pkl")
 
     return EV
 # %%
-evaluate_policy()
 
-# plot paths
-import matplotlib.pyplot as plt
-R_path = np.load("Results/BACKTEST_R_path.npy").ravel()
-x_intraday_path = np.load("Results/BACKTEST_x_intraday_path.npy").ravel()
-P_day_path = np.load("Results/BACKTEST_P_day_path.npy").ravel()
-P_intraday_path = np.load("Results/BACKTEST_P_intraday_path.npy").ravel()
-x_pump_path = np.load("Results/BACKTEST_x_pump_path.npy").ravel()
-x_turbine_path = np.load("Results/BACKTEST_x_turbine_path.npy").ravel()
-y_pump_path = np.load("Results/BACKTEST_y_pump_path.npy").ravel()
-y_turbine_path = np.load("Results/BACKTEST_y_turbine_path.npy").ravel()
-z_pump_path = np.load("Results/BACKTEST_z_pump_path.npy").ravel()
-
-# Create a figure with multiple subplots
-fig, axs = plt.subplots(3, 3, figsize=(15, 10))
-fig.suptitle("Backtest Data Plots", fontsize=16)
-
-# Plot each array in a subplot
-data = {
-    "R Path": R_path,
-    "x Intraday Path": x_intraday_path,
-    "P Day Path": P_day_path,
-    "P Intraday Path": P_intraday_path,
-    "x Pump Path": x_pump_path,
-    "x Turbine Path": x_turbine_path,
-    "y Pump Path": y_pump_path,
-    "y Turbine Path": y_turbine_path,
-    "z Pump Path": z_pump_path,
-}
-
-# Iterate through data and subplots
-for ax, (title, array) in zip(axs.flat, data.items()):
-    ax.plot(array)
-    ax.set_title(title)
-    ax.set_xlabel("Time Steps")
-    ax.set_ylabel("Values")
-    ax.grid(True)
-
-# Adjust layout
-plt.tight_layout(rect=[0, 0, 1, 0.96])
-plt.show()
-# %%
+if __name__ == "__main__":
+    generate_offline_data()
