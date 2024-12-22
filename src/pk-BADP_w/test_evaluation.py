@@ -708,7 +708,7 @@ def backtest(test_data):
     np.save("Results/BACKTEST_z_turbine_path.npy", z_turbine_path)
     
 
-    return EV
+    return EV, V
 # %%
 
 # if __name__ == "__main__":
@@ -717,7 +717,7 @@ def backtest(test_data):
 
 # %%
 
-backtest(test_df)
+ev, v, = backtest(test_df)
 # %%
 
 # plot paths
