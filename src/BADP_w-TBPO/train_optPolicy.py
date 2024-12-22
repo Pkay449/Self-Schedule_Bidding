@@ -124,11 +124,9 @@ class PolicyID(nn.Module):
         raw_actions = nn.Dense(self.action_dim)(x)
 
         # Define masks for bounded and unbounded actions
-        # mask_bound = jnp.concatenate([jnp.ones(96), jnp.zeros(672), jnp.ones(384)])
-        # scaled_actions = self.lb + (self.ub - self.lb) * nn.sigmoid(raw_actions)
-        # final_actions = mask_bound * scaled_actions + (1.0 - mask_bound) * raw_actions
-        final_actions = raw_actions
-        return final_actions
+        scaled_actions = self.lb + (self.ub - self.lb) * nn.sigmoid(raw_actions)
+        # final_actions = raw_actions
+        return scaled_actions
 
 
 # ----------------------------------------------------
@@ -157,14 +155,14 @@ POS_INF = 1e6
 
 lb_id = np.concatenate([
     np.zeros(96),                # bounded
-    NEG_INF * np.ones(672),      # unbounded (lower bound ~ -inf)
-    np.zeros(384)                # bounded
+    NEG_INF * np.ones(96),      # unbounded (lower bound ~ -inf)
+    np.zeros(96*10)                # bounded
 ]).astype(np.float32)
 
 ub_id = np.concatenate([
-    sim_params.x_max_pump * np.ones(96),  # bounded
-    POS_INF * np.ones(672),               # unbounded (upper bound ~ inf)
-    np.ones(384)                          # bounded
+    sim_params.Rmax * np.ones(96),  # bounded
+    POS_INF * np.ones(96 * 7),               # unbounded (upper bound ~ inf)
+    np.ones(96 * 4)                          # bounded
 ]).astype(np.float32)
 
 # Initialize models
