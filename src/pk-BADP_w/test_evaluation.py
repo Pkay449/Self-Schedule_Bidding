@@ -123,6 +123,10 @@ def backtest(test_data):
     id_r = []
     id_s_prime = []
     
+    # Enviroment trackers
+    storage_track = []
+    storage_track.append(R_0)
+    
     
     
     data_DA = test_data['DA_day_t']
@@ -649,11 +653,23 @@ def backtest(test_data):
                 - np.sum(z_pump) * Q_start_pump
                 - np.sum(z_turbine) * Q_start_turbine
             )
+            
+            # UPDATE TRACKERS
+            storage_track.append(R)
 
         V[m] = C
+        
+    V = V[6:]
 
     EV = np.mean(V)
     print(EV)
+    
+    # print backtest statistics :
+    print("Backtest Statistics:")
+    print("Mean Value: ", np.mean(V))
+    print("Standard Deviation: ", np.std(V))
+    print("Total Reward: ", np.sum(V))
+    
 
     # Save offline dataset as pickle
 
@@ -674,6 +690,23 @@ def backtest(test_data):
     })
 
     df_id.to_pickle("Results/BACKTEST_offline_dataset_intraday.pkl")
+    
+    # save trackers
+    # storage_track
+    np.save("Results/BACKTEST_storage_track.npy", storage_track)
+    
+    # Save paths
+    np.save("Results/BACKTEST_R_path.npy", R_path)
+    np.save("Results/BACKTEST_x_intraday_path.npy", x_intraday_path)
+    np.save("Results/BACKTEST_P_day_path.npy", P_day_path)
+    np.save("Results/BACKTEST_P_intraday_path.npy", P_intraday_path)
+    np.save("Results/BACKTEST_x_pump_path.npy", x_pump_path)
+    np.save("Results/BACKTEST_x_turbine_path.npy", x_turbine_path)
+    np.save("Results/BACKTEST_y_pump_path.npy", y_pump_path)
+    np.save("Results/BACKTEST_y_turbine_path.npy", y_turbine_path)
+    np.save("Results/BACKTEST_z_pump_path.npy", z_pump_path)
+    np.save("Results/BACKTEST_z_turbine_path.npy", z_turbine_path)
+    
 
     return EV
 # %%
@@ -686,5 +719,17 @@ def backtest(test_data):
 
 backtest(test_df)
 # %%
+
+# plot paths
+import matplotlib.pyplot as plt
+R_path = np.load("Results/BACKTEST_R_path.npy").ravel()
+x_intraday_path = np.load("Results/BACKTEST_x_intraday_path.npy").ravel()
+P_day_path = np.load("Results/BACKTEST_P_day_path.npy").ravel()
+P_intraday_path = np.load("Results/BACKTEST_P_intraday_path.npy").ravel()
+x_pump_path = np.load("Results/BACKTEST_x_pump_path.npy").ravel()
+x_turbine_path = np.load("Results/BACKTEST_x_turbine_path.npy").ravel()
+y_pump_path = np.load("Results/BACKTEST_y_pump_path.npy").ravel()
+y_turbine_path = np.load("Results/BACKTEST_y_turbine_path.npy").ravel()
+z_pump_path = np.load("Results/BACKTEST_z_pump_path.npy").ravel()
 
 # %%

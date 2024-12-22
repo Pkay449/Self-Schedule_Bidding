@@ -37,7 +37,7 @@ if False:  # Example if no arguments are given, just hardcode as in MATLAB
 
 N = 50
 M = 10
-T = 3
+T = 30
 Season = "Summer"
 length_R = 5
 seed = 2
@@ -603,3 +603,5 @@ for m in range(M):
 
 EV = np.mean(V)
 print(EV)
+
+# %%

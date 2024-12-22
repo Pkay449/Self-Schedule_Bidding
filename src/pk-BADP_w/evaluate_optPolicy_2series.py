@@ -129,7 +129,9 @@ def evaluate_optPolicy_2series():
     id_r = []
     id_s_prime = []
     
-    # REVERSE DATASET
+    # Enviroment trackers
+    storage_track = []
+    storage_track.append(R_0)
 
     for m in range(M): # for each day in REAL DATASET:
         R = R_0
@@ -640,6 +642,9 @@ def evaluate_optPolicy_2series():
                 - np.sum(z_pump) * Q_start_pump
                 - np.sum(z_turbine) * Q_start_turbine
             )
+            
+            # UPDATE TRACKERS
+            storage_track.append(R)
 
         V[m] = C
 
@@ -665,9 +670,29 @@ def evaluate_optPolicy_2series():
     })
 
     df_id.to_pickle("Results/offline_dataset_intraday.pkl")
+    
+    # save trackers
+    # storage_track
+    np.save("Results/storage_track.npy", storage_track)
+    
+    # save all paths
+    np.save("Results/R_path.npy", R_path)
+    np.save("Results/x_intraday_path.npy", x_intraday_path)
+    np.save("Results/P_day_path.npy", P_day_path)
+    np.save("Results/P_intraday_path.npy", P_intraday_path)
+    np.save("Results/x_pump_path.npy", x_pump_path)
+    np.save("Results/x_turbine_path.npy", x_turbine_path)
+    np.save("Results/y_pump_path.npy", y_pump_path)
+    np.save("Results/y_turbine_path.npy", y_turbine_path)
+    np.save("Results/z_pump_path.npy", z_pump_path)
+    np.save("Results/z_turbine_path.npy", z_turbine_path)
+    
+    
+    
 
     return EV
 # %%
 
 if __name__ == "__main__":
     evaluate_optPolicy_2series()
+# %%
