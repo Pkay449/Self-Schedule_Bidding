@@ -183,19 +183,19 @@ class PolicyID(nn.Module):
         self.lower_bounded_mask_np = ((self.lb > NEG_INF) & (self.ub == POS_INF))
         self.upper_bounded_mask_np = ((self.lb == NEG_INF) & (self.ub < POS_INF))
         self.unbounded_mask_np = ((self.lb == NEG_INF) & (self.ub == POS_INF))
-        
+
         # Convert to JAX boolean arrays
         self.bounded_mask = jnp.array(self.bounded_mask_np, dtype=bool)
         self.lower_bounded_mask = jnp.array(self.lower_bounded_mask_np, dtype=bool)
         self.upper_bounded_mask = jnp.array(self.upper_bounded_mask_np, dtype=bool)
         self.unbounded_mask = jnp.array(self.unbounded_mask_np, dtype=bool)
-        
+
         # Verify that masks cover all action dimensions
         # total_masks = jnp.sum(self.bounded_mask) + jnp.sum(self.lower_bounded_mask) + \
         #               jnp.sum(self.upper_bounded_mask) + jnp.sum(self.unbounded_mask)
         # assert total_masks == self.action_dim, \
         #     f"Sum of all masks ({total_masks}) does not equal action_dim ({self.action_dim})"
-        
+
 
     @nn.compact
     def __call__(self, state: jnp.ndarray) -> jnp.ndarray:
@@ -322,11 +322,13 @@ q_da_target_params = q_da_params
 q_id_target_params = q_id_params
 
 # Optimizers
-learning_rate = 1e-5
-q_da_opt = optax.adam(1e-4)
-q_id_opt = optax.adam(1e-4)
-policy_da_opt = optax.adam(1e-5)
-policy_id_opt = optax.adam(1e-5)
+q_learning_rate = 1e-4
+policy_learning_rate = 1e-5
+
+q_da_opt = optax.adam(q_learning_rate)
+q_id_opt = optax.adam(q_learning_rate)
+policy_da_opt = optax.adam(policy_learning_rate)
+policy_id_opt = optax.adam(policy_learning_rate)
 
 q_da_opt_state = q_da_opt.init(q_da_params)
 q_id_opt_state = q_id_opt.init(q_id_params)
