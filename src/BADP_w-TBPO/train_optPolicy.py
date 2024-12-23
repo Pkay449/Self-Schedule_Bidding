@@ -48,7 +48,7 @@ def qp_projection(raw_actions, A, b, Aeq, beq, lb, ub, solver, relaxation=10):
     I = jnp.eye(dim)
     # A = jnp.vstack([A, I, -I])
     # b = jnp.concatenate([b, ub, -lb])
-    
+
     # A = b
     # |A - b| <= relaxation
     # A - b <= relaxation and A - b >= - relaxation
@@ -199,7 +199,7 @@ class PolicyID(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
-        
+
         actions = nn.Dense(self.action_dim)(x)  # Shape: (batch_size, action_dim)
 
         return actions
@@ -279,10 +279,10 @@ q_id_target_params = q_id_params
 
 # Optimizers
 learning_rate = 1e-5
-q_da_opt = optax.adam(learning_rate)
-q_id_opt = optax.adam(learning_rate)
-policy_da_opt = optax.adam(learning_rate)
-policy_id_opt = optax.adam(learning_rate)
+q_da_opt = optax.adam(1e-4)
+q_id_opt = optax.adam(1e-4)
+policy_da_opt = optax.adam(1e-5)
+policy_id_opt = optax.adam(1e-5)
 
 q_da_opt_state = q_da_opt.init(q_da_params)
 q_id_opt_state = q_id_opt.init(q_id_params)
@@ -291,7 +291,7 @@ policy_id_opt_state = policy_id_opt.init(policy_id_params)
 
 gamma = 0.99
 batch_size = 256
-num_epochs = 20
+num_epochs = 50
 
 
 @jax.jit
@@ -446,7 +446,7 @@ def update_policy_id_with_penalty(
         # Concatenate all constraints
         A = jnp.concatenate([A, I, -I, Aeq, -Aeq], axis=1)
         b = jnp.concatenate([b, ub, -lb, beq + relaxation, -beq + relaxation], axis=1)
-        
+
         # A = jnp.concatenate([A, I, -I], axis=1)
         # b = jnp.concatenate([b, ub, -lb], axis=1)
 
@@ -467,7 +467,7 @@ def update_policy_id_with_penalty(
         )
 
         # Total loss
-        return -jnp.mean(q_values) + 1e20 * penalty  # 1e7 is a hyperparameter
+        return -jnp.mean(q_values) + 1e30 * penalty  # 1e7 is a hyperparameter
 
 
     grads = jax.grad(loss_fn)(policy_id_params)
@@ -488,17 +488,18 @@ for epoch in range(num_epochs):
         s_da_next = jnp.array(s_da_next, dtype=jnp.float32)
 
         # Update Q_ID
-        q_id_params, q_id_opt_state, _ = update_q_id(
-            q_id_params,
-            q_id_opt_state,
-            q_id_target_params,
-            q_da_target_params,
-            policy_da_params,
-            s_id,
-            a_id,
-            r_id,
-            s_da_next,
-        )
+        for i in range(5):
+            q_id_params, q_id_opt_state, _ = update_q_id(
+                q_id_params,
+                q_id_opt_state,
+                q_id_target_params,
+                q_da_target_params,
+                policy_da_params,
+                s_id,
+                a_id,
+                r_id,
+                s_da_next,
+            )
 
         # Update Policy_ID with penalties
         policy_id_params, policy_id_opt_state = update_policy_id_with_penalty(
@@ -528,17 +529,18 @@ for epoch in range(num_epochs):
         s_id_next = jnp.array(s_id_next, dtype=jnp.float32)
 
         # Update Q_DA
-        q_da_params, q_da_opt_state, _ = update_q_da(
-            q_da_params,
-            q_da_opt_state,
-            q_da_target_params,
-            q_id_target_params,
-            policy_id_params,
-            s_da,
-            a_da,
-            r_da,
-            s_id_next,
-        )
+        for i in range(5):
+            q_da_params, q_da_opt_state, _ = update_q_da(
+                q_da_params,
+                q_da_opt_state,
+                q_da_target_params,
+                q_id_target_params,
+                policy_id_params,
+                s_da,
+                a_da,
+                r_da,
+                s_id_next,
+            )
 
         # Update Policy_DA
         policy_da_params, policy_da_opt_state = update_policy_da(
