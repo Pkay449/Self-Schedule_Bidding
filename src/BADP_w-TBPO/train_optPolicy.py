@@ -216,7 +216,23 @@ class PolicyID(nn.Module):
         x = nn.Dense(self.hidden_dim)(x)
         x = nn.relu(x)
 
-        actions = nn.Dense(self.action_dim)(x)  # Shape: (batch_size, action_dim)
+        raw_actions = nn.Dense(self.action_dim)(x)  # Shape: (batch_size, action_dim)
+
+        # 2. Apply transformations based on mask types using jnp.where
+
+        # a. Fully Bounded: [lb, ub]
+        bounded_actions = self.lb + (self.ub - self.lb) * nn.sigmoid(raw_actions)
+        actions = jnp.where(self.bounded_mask, bounded_actions, raw_actions)
+
+        # b. Lower Bounded Only: [lb, +inf)
+        lower_bounded_actions = self.lb + nn.softplus(raw_actions)
+        actions = jnp.where(self.lower_bounded_mask, lower_bounded_actions, actions)
+
+        # c. Upper Bounded Only: (-inf, ub]
+        upper_bounded_actions = self.ub - nn.softplus(raw_actions)
+        actions = jnp.where(self.upper_bounded_mask, upper_bounded_actions, actions)
+
+        # d. Unbounded: (-inf, +inf) - already set to raw_actions
 
         return actions
 
@@ -306,12 +322,11 @@ q_da_target_params = q_da_params
 q_id_target_params = q_id_params
 
 # Optimizers
-q_learning_rate = 1e-4
-policy_learning_rate = 1e-5
-q_da_opt = optax.adam(q_learning_rate)
-q_id_opt = optax.adam(q_learning_rate)
-policy_da_opt = optax.adam(policy_learning_rate)
-policy_id_opt = optax.adam(policy_learning_rate)
+learning_rate = 1e-5
+q_da_opt = optax.adam(1e-4)
+q_id_opt = optax.adam(1e-4)
+policy_da_opt = optax.adam(1e-5)
+policy_id_opt = optax.adam(1e-5)
 
 q_da_opt_state = q_da_opt.init(q_da_params)
 q_id_opt_state = q_id_opt.init(q_id_params)
@@ -465,19 +480,16 @@ def update_policy_id_with_penalty(
         )
         batch_size = A.shape[0]
         action_size = a_id.shape[-1]
-        relaxation = 1e-1
+        relaxation = 1e2
 
         # Create identity matrix with batch dimension
         I = jnp.eye(action_size)
         I = jnp.expand_dims(I, axis=0)  # Shape: (1, action_size, action_size)
         I = jnp.tile(I, (batch_size, 1, 1))  # Shape: (batch_size, action_size, action_size)
 
-        # Concatenate all constraints
-        A = jnp.concatenate([A, I, -I, Aeq, -Aeq], axis=1)
-        b = jnp.concatenate([b, ub, -lb, beq + relaxation, -beq + relaxation], axis=1)
-
-        # A = jnp.concatenate([A, I, -I], axis=1)
-        # b = jnp.concatenate([b, ub, -lb], axis=1)
+        # # Concatenate all constraints
+        A = jnp.concatenate([A, Aeq, -Aeq], axis=1)
+        b = jnp.concatenate([b, beq + relaxation, -beq + relaxation], axis=1)
 
 
         # Penalty for A * x <= b
@@ -495,7 +507,7 @@ def update_policy_id_with_penalty(
 
 
         # Total loss
-        return -jnp.mean(q_values) + 1e30 * penalty  # 1e7 is a hyperparameter
+        return -jnp.mean(q_values) + penalty
 
 
     grads = jax.grad(loss_fn)(policy_id_params)
