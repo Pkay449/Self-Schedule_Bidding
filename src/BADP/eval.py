@@ -19,6 +19,8 @@ from src.helpers import (
 
 warnings.filterwarnings("ignore")
 
+import matplotlib.pyplot as plt
+
 
 def evaluate_policy(
     sim_params: SimulationParams,
@@ -670,4 +672,42 @@ def evaluate_policy(
     np.save(os.path.join(save_path, "BACKTEST_z_pump_path.npy"), z_pump_path)
     np.save(os.path.join(save_path, "BACKTEST_z_turbine_path.npy"), z_turbine_path)
 
+    # Plot each array in a subplot
+    backtest_data = {
+        "R Path": R_path,
+        "x Intraday Path": x_intraday_path,
+        "P Day Path": P_day_path,
+        "P Intraday Path": P_intraday_path,
+        "x Pump Path": x_pump_path,
+        "x Turbine Path": x_turbine_path,
+        "y Pump Path": y_pump_path,
+        "y Turbine Path": y_turbine_path,
+        "z Pump Path": z_pump_path,
+    }
+
+    # Plot and save results
+    plot_results(backtest_data, save_path)
+
     return EV
+
+
+def plot_results(data, save_path):
+    """Plots and save results"""
+
+    # Create a figure with multiple subplots
+    fig, axs = plt.subplots(3, 3, figsize=(15, 10))
+    fig.suptitle("Backtest Data Plots", fontsize=16)
+
+    # Iterate through data and subplots
+    for ax, (title, array) in zip(axs.flat, data.items()):
+        ax.plot(array)
+        ax.set_title(title)
+        ax.set_xlabel("Time Steps")
+        ax.set_ylabel("Values")
+        ax.grid(True)
+
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    # Save the figure
+    plt.savefig(save_path)

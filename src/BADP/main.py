@@ -59,9 +59,8 @@ def main():
         Vt,
         P_day_state,
         P_intra_state,
-        "src/BADP/objects/",
+        "src/BADP/objects/backtest",
     )
-
-
+    
 if __name__ == "__main__":
     main()
