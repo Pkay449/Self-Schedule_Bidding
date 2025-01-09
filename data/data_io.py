@@ -23,8 +23,8 @@ def load_test_data():
     # Loads data from DATA_PATH\test_data
     full_data_dir = os.path.join(DATA_PATH, "test_data")
     
-    da_test_path = os.path.join(full_data_dir, "P_day_ahead_test_all.npy")
-    id_test_path = os.path.join(full_data_dir, "P_intraday_test_all.npy")
+    da_test_path = os.path.join(full_data_dir, "P_day_ahead_test_all.mat")
+    id_test_path = os.path.join(full_data_dir, "P_intraday_test_all.mat")
     
     P_day_mat = loadmat(da_test_path)
     P_intraday_mat = loadmat(id_test_path)

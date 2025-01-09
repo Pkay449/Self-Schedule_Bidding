@@ -17,7 +17,7 @@ from scipy.spatial import ConvexHull
 from tqdm import tqdm
 
 from src.config import SimulationParams
-from src.helpers import (
+from src.utils.helpers import (
     VRx_weights,
     badp_weights,
     build_and_solve_intlinprog,

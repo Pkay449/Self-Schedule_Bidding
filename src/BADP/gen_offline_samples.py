@@ -10,7 +10,7 @@ from scipy.spatial import ConvexHull
 warnings.filterwarnings("ignore")
 
 from src.config import SimulationParams
-from src.helpers import (
+from src.utils.helpers import (
     badp_weights,
     build_and_solve_intlinprog,
     compute_weights,

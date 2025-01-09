@@ -1,4 +1,5 @@
-@ -1,2879 +0,0 @@
+# src/BADP/badp_main.py
+
 # %% [markdown]
 # # Energy storage bidding strategies using approximate dynamic programming
 #

@@ -8,7 +8,7 @@ import numpy as np
 from scipy.spatial import ConvexHull
 
 from src.config import SimulationParams
-from src.helpers import (
+from src.utils.helpers import (
     badp_weights,
     build_and_solve_intlinprog,
     compute_weights,
