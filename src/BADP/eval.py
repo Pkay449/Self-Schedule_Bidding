@@ -685,14 +685,21 @@ def evaluate_policy(
         "z Pump Path": z_pump_path,
     }
 
+    # Validate data
+    for key, array in backtest_data.items():
+        if array.size == 0:
+            print(f"Warning: '{key}' contains no data.")
+
     # Plot and save results
     plot_results(backtest_data, save_path)
 
     return EV
 
 
-def plot_results(data, save_path):
-    """Plots and save results"""
+def plot_results(data, save_dir):
+    """Plots and saves results"""
+    # Ensure the save directory exists
+    os.makedirs(save_dir, exist_ok=True)
 
     # Create a figure with multiple subplots
     fig, axs = plt.subplots(3, 3, figsize=(15, 10))
@@ -700,7 +707,10 @@ def plot_results(data, save_path):
 
     # Iterate through data and subplots
     for ax, (title, array) in zip(axs.flat, data.items()):
-        ax.plot(array)
+        if array.size == 0:
+            ax.text(0.5, 0.5, "No Data", ha="center", va="center", fontsize=12)
+        else:
+            ax.plot(array.flatten())  # Flatten to ensure 1D plotting
         ax.set_title(title)
         ax.set_xlabel("Time Steps")
         ax.set_ylabel("Values")
@@ -709,5 +719,8 @@ def plot_results(data, save_path):
     # Adjust layout
     plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-    # Save the figure
+    # Save the figure in the provided directory
+    save_path = os.path.join(save_dir, "backtest_plots.png")
     plt.savefig(save_path)
+    plt.close(fig)  # Close the figure to avoid resource leaks
+    print(f"Plots saved at: {save_path}")

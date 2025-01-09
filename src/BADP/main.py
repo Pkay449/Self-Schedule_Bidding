@@ -40,6 +40,10 @@ def main():
     np.save("src/BADP/objects/Vt.npy", Vt)
     np.save("src/BADP/objects/P_day_state.npy", P_day_state)
     np.save("src/BADP/objects/P_intra_state.npy", P_intra_state)
+    
+    # Vt = np.load("src/BADP/objects/model_state/Vt.npy")
+    # P_day_state = np.load("src/BADP/objects/model_state/P_day_state.npy")
+    # P_intra_state = np.load("src/BADP/objects/model_state/P_intra_state.npy")
 
     # 3. Generate offline samples
     EV, offline_DA, offline_ID = generate_offline_data(
