@@ -24,15 +24,14 @@ from src.helpers import (
     sample_price_intraday,
 )
 
-# Tuple
 from typing import Tuple
 from src.config import SimulationParams
 
 warnings.filterwarnings("ignore")
 
 def train_policy(sim_params: SimulationParams, 
-                p_day_0: np.ndarray, 
-                p_intraday_0: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                P_day_0: np.ndarray, 
+                P_intraday_0: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Train or derive an optimal policy over a backward pass across T time steps.
 
@@ -78,7 +77,7 @@ def train_policy(sim_params: SimulationParams,
 
     # Generate simulated day-ahead and intraday price scenarios
     sample_P_day_all, sample_P_intraday_all, Wt_day_mat, Wt_intra_mat = generate_scenarios(
-        N, T, sim_params.D, p_day_0, p_intraday_0, sim_params.Season, seed=sim_params.seed
+        N, T, sim_params.D, P_day_0, P_intraday_0, sim_params.Season, seed=sim_params.seed
     )
 
     # Copy scenario data to separate arrays for clarity
