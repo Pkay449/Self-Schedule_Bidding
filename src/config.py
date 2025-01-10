@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import os
 from dotenv import load_dotenv
 import numpy as np
+import jax.numpy as jnp
 
 @dataclass
 class SimulationParams:
@@ -62,4 +63,19 @@ ROOT_PATH = os.path.abspath(pythonpath)
 
 # Data directory (root/data)
 DATA_PATH = os.path.join(ROOT_PATH, "data")
-    
+DA_DATA_PATH = os.path.join(DATA_PATH, "offline_samples\offline_DA.pkl")
+ID_DATA_PATH = os.path.join(DATA_PATH, "offline_samples\offline_ID.pkl")
+
+
+# NFQCA
+# Constants
+NEG_INF = -1e8
+POS_INF = 1e8
+
+# Hyperparameters
+Q_LEARNING_RATE = 1e-4
+POLICY_LEARNING_RATE = 1e-5
+GAMMA = 0.99
+BATCH_SIZE = 256
+NUM_EPOCHS = 50
+TAU = 0.005  # Soft update parameter

@@ -7,12 +7,16 @@ This module contains functions for computing weights, sampling prices,
 generating scenarios, and building constraints for optimization problems.
 """
 
+import pickle as pkl
+
 import warnings
 
 import matlab.engine
 import numpy as np
+import jax
 from jax import vmap
 import jax.numpy as jnp
+import optax
 from qpsolvers import available_solvers, solve_qp
 from scipy.io import loadmat
 from scipy.optimize import minimize_scalar

@@ -23,6 +23,7 @@ from src.BADP.eval import evaluate_policy
 from src.BADP.gen_offline_samples import generate_offline_data
 from src.BADP.train import train_policy
 from src.config import SimulationParams
+from src.config import DATA_PATH
 
 # pickle
 
@@ -37,9 +38,9 @@ def main():
     # 2. Train policy (Backward Approximate DP)
     Vt, P_day_state, P_intra_state = train_policy(sim_params, P_day_mat, P_intraday_mat)
     # save to src/BADP/objects
-    np.save("src/BADP/objects/Vt.npy", Vt)
-    np.save("src/BADP/objects/P_day_state.npy", P_day_state)
-    np.save("src/BADP/objects/P_intra_state.npy", P_intra_state)
+    np.save("src/BADP/objects/model_state/Vt.npy", Vt)
+    np.save("src/BADP/objects/model_state/P_day_state.npy", P_day_state)
+    np.save("src/BADP/objects/model_state/P_intra_state.npy", P_intra_state)
     
     # Vt = np.load("src/BADP/objects/model_state/Vt.npy")
     # P_day_state = np.load("src/BADP/objects/model_state/P_day_state.npy")
@@ -49,9 +50,9 @@ def main():
     EV, offline_DA, offline_ID = generate_offline_data(
         sim_params, P_day_mat, P_intraday_mat, Vt, P_day_state, P_intra_state
     )
-    # save to src/BADP/objects
-    offline_DA.to_pickle("src/BADP/objects/offline_DA.pkl")
-    offline_ID.to_pickle("src/BADP/objects/offline_ID.pkl")
+    # save to DATA_PATH/offline_samples
+    offline_DA.to_pickle(os.path.join(DATA_PATH, "offline_samples/offline_DA.pkl"))
+    offline_ID.to_pickle(os.path.join(DATA_PATH, "offline_samples/offline_ID.pkl"))
 
     # 4. Evaluate on test data
     # Load test data
