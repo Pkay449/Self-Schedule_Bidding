@@ -5,7 +5,9 @@ import os
 from scipy.io import loadmat
 import matplotlib.pyplot as plt
 
-def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, policy_da_params):
+from src.utils.helpers import sample_price_day, sample_price_intraday
+
+def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, policy_da_params, save_path):
     """
     Evaluate the performance of the learned policies for intraday and day-ahead energy trading.
 
@@ -181,16 +183,58 @@ def eval_learned_policy(policy_id_model, policy_da_model, policy_id_params, poli
 
     # save trackers
     # storage_track
-    np.save("Results/NFQCA/BACKTEST_storage_track.npy", storage_track)
+    np.save(os.path.join(save_path, "BACKTEST_storage_track.npy"), storage_track)
 
     # Save paths
-    np.save("Results/NFQCA/BACKTEST_R_path.npy", R_path)
-    np.save("Results/NFQCA/BACKTEST_x_intraday_path.npy", x_intraday_path)
-    np.save("Results/NFQCA/BACKTEST_P_day_path.npy", P_day_path)
-    np.save("Results/NFQCA/BACKTEST_P_intraday_path.npy", P_intraday_path)
-    np.save("Results/NFQCA/BACKTEST_x_pump_path.npy", x_pump_path)
-    np.save("Results/NFQCA/BACKTEST_x_turbine_path.npy", x_turbine_path)
-    np.save("Results/NFQCA/BACKTEST_y_pump_path.npy", y_pump_path)
-    np.save("Results/NFQCA/BACKTEST_y_turbine_path.npy", y_turbine_path)
-    np.save("Results/NFQCA/BACKTEST_z_pump_path.npy", z_pump_path)
-    np.save("Results/NFQCA/BACKTEST_z_turbine_path.npy", z_turbine_path)
+    np.save(os.path.join(save_path, "BACKTEST_R_path.npy"), R_path)
+    np.save(os.path.join(save_path, "BACKTEST_x_intraday_path.npy"), x_intraday_path)
+    np.save(os.path.join(save_path, "BACKTEST_P_day_path.npy"), P_day_path)
+    np.save(os.path.join(save_path, "BACKTEST_P_intraday_path.npy"), P_intraday_path)
+    np.save(os.path.join(save_path, "BACKTEST_x_pump_path.npy"), x_pump_path)
+    np.save(os.path.join(save_path, "BACKTEST_x_turbine_path.npy"), x_turbine_path)
+    np.save(os.path.join(save_path, "BACKTEST_y_pump_path.npy"), y_pump_path)
+    np.save(os.path.join(save_path, "BACKTEST_y_turbine_path.npy"), y_turbine_path)
+    np.save(os.path.join(save_path, "BACKTEST_z_pump_path.npy"), z_pump_path)
+    np.save(os.path.join(save_path, "BACKTEST_z_turbine_path.npy"), z_turbine_path)
+    
+    
+def plot_backtest_results(results_path):
+    R_path = np.load(os.path.join(results_path, "BACKTEST_R_path.npy")).ravel()
+    x_intraday_path = np.load(os.path.join(results_path, "BACKTEST_x_intraday_path.npy")).ravel()
+    P_day_path = np.load(os.path.join(results_path, "BACKTEST_P_day_path.npy")).ravel()
+    P_intraday_path = np.load(os.path.join(results_path, "BACKTEST_P_intraday_path.npy")).ravel()
+    x_pump_path = np.load(os.path.join(results_path, "BACKTEST_x_pump_path.npy")).ravel()
+    x_turbine_path = np.load(os.path.join(results_path, "BACKTEST_x_turbine_path.npy")).ravel()
+    y_pump_path = np.load(os.path.join(results_path, "BACKTEST_y_pump_path.npy")).ravel()
+    y_turbine_path = np.load(os.path.join(results_path, "BACKTEST_y_turbine_path.npy")).ravel()
+    z_pump_path = np.load(os.path.join(results_path, "BACKTEST_z_pump_path.npy")).ravel()
+
+    # Create a figure with multiple subplots
+    fig, axs = plt.subplots(3, 3, figsize=(15, 10))
+    fig.suptitle("Backtest Data Plots", fontsize=16)
+
+    # Plot each array in a subplot
+    data = {
+        "R Path": R_path,
+        "x Intraday Path": x_intraday_path,
+        "P Day Path": P_day_path,
+        "P Intraday Path": P_intraday_path,
+        "x Pump Path": x_pump_path,
+        "x Turbine Path": x_turbine_path,
+        "y Pump Path": y_pump_path,
+        "y Turbine Path": y_turbine_path,
+        "z Pump Path": z_pump_path,
+    }
+
+    # Iterate through data and subplots
+    for ax, (title, array) in zip(axs.flat, data.items()):
+        ax.plot(array)
+        ax.set_title(title)
+        ax.set_xlabel("Time Steps")
+        ax.set_ylabel("Values")
+        ax.grid(True)
+
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(os.path.join(results_path, "backtest_plots.png"))
+    plt.show()
