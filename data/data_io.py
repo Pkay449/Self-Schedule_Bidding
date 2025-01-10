@@ -2,6 +2,7 @@
 
 import os
 import numpy as np
+import pickle as pkl
 from scipy.io import loadmat
 
 from src.config import ROOT_PATH, DATA_PATH
@@ -33,3 +34,22 @@ def load_test_data():
     P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
     
     return P_day_0, P_intraday_0
+
+def load_offline_data(
+    path: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Loads offline dataset from a pickle file. The file is expected to contain a dictionary
+    with keys: "state", "action", "reward", "next_state". Each value should be a Series
+    or array-like from which we can extract arrays.
+
+    Returns:
+        states, actions, rewards, next_states
+    """
+    with open(path, "rb") as f:
+        df = pkl.load(f)
+    states = np.stack(df["state"].values)
+    actions = np.stack(df["action"].values)
+    rewards = df["reward"].values
+    next_states = np.stack(df["next_state"].values)
+    return states, actions, rewards, next_states
