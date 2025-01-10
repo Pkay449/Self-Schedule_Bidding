@@ -4,9 +4,11 @@ import flax.linen as nn
 import jax.numpy as jnp
 
 from src.config import SimulationParams
+from src.config import TrainingParams
 
-NEG_INF = -1e8
-POS_INF = 1e8
+training_params = TrainingParams()
+NEG_INF = training_params.NEG_INF
+POS_INF = training_params.POS_INF
 
 
 class PolicyID(nn.Module):

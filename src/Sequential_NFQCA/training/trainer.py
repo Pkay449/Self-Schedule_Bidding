@@ -24,6 +24,7 @@ class NFQCA:
         # Initialize models
         self.q_da_model = QNetwork(state_dim=842, action_dim=24)
         self.q_id_model = QNetwork(state_dim=890, action_dim=1152)
+
         self.policy_da_model = PolicyDA(
             ub=sim_params.x_max_pump,
             lb=-sim_params.x_max_turbine,
@@ -66,24 +67,30 @@ class NFQCA:
         self.policy_id_opt_state = self.policy_id_opt.init(self.policy_id_params)
 
     def get_lb_id(self):
-        # Define lb_id as per original code
+        """
+        Construct the lower-bound array for the intraday policy.
+        We now pull NEG_INF from self.training_params for clarity.
+        """
+        NEG_INF = self.training_params.NEG_INF
         lb_id = jnp.concatenate(
             [
                 jnp.zeros(96),  # bounded
-                self.training_params.NEG_INF
-                * jnp.ones(96),  # unbounded (lower bound ~ -inf)
+                NEG_INF * jnp.ones(96),  # unbounded
                 jnp.zeros(96 * 10),  # bounded
             ]
         )
         return lb_id
 
     def get_ub_id(self):
-        # Define ub_id as per original code
+        """
+        Construct the upper-bound array for the intraday policy.
+        We now pull POS_INF from self.training_params.
+        """
+        POS_INF = self.training_params.POS_INF
         ub_id = jnp.concatenate(
             [
                 self.sim_params.Rmax * jnp.ones(96),  # bounded
-                self.training_params.POS_INF
-                * jnp.ones(96 * 7),  # unbounded (upper bound ~ inf)
+                POS_INF * jnp.ones(96 * 7),  # unbounded
                 jnp.ones(96 * 4),  # bounded
             ]
         )
@@ -105,8 +112,7 @@ class NFQCA:
                 self.q_da_target_params, s_da_next, next_da_actions
             )
             q_target = r_id + gamma * q_da_values
-            loss = mse_loss(q_estimate, q_target)
-            return loss
+            return mse_loss(q_estimate, q_target)
 
         grads = jax.grad(loss_fn)(self.q_id_params)
         updates, self.q_id_opt_state = self.q_id_opt.update(grads, self.q_id_opt_state)
@@ -128,8 +134,7 @@ class NFQCA:
                 self.q_id_target_params, s_id_next, next_id_actions
             )
             q_target_da = r_da + gamma * q_id_values
-            loss = mse_loss(q_da_values, q_target_da)
-            return loss
+            return mse_loss(q_da_values, q_target_da)
 
         grads = jax.grad(loss_fn)(self.q_da_params)
         updates, self.q_da_opt_state = self.q_da_opt.update(grads, self.q_da_opt_state)
@@ -167,10 +172,7 @@ class NFQCA:
         )
         self.policy_id_params = optax.apply_updates(self.policy_id_params, updates)
 
-    def update_policy_id_with_penalty(
-        self,
-        states_id,
-    ):
+    def update_policy_id_with_penalty(self, states_id):
         """
         Update Policy_ID by maximizing Q_ID(s, policy_ID(s)) with penalty for constraint violations.
         """
@@ -207,26 +209,23 @@ class NFQCA:
                 x_max_turbine,
                 Rmax,
             )
+
             batch_size = A.shape[0]
-            a_id.shape[-1]
             relaxation = 1e2
 
             # Concatenate all constraints
+            # A_total: (batch_size, num_constraints, action_size)
             A_total = jnp.concatenate([A, Aeq, -Aeq], axis=1)
             b_total = jnp.concatenate([b, beq + relaxation, -beq + relaxation], axis=1)
 
             # Penalty for A * x <= b
-            # Ensure that A_total and a_id have compatible shapes for einsum
-            # Assuming A_total has shape (batch_size, num_constraints, action_size)
-            # and a_id has shape (batch_size, action_size)
-            # We need to compute (batch_size, num_constraints)
             Ax = jnp.einsum(
                 "bca,ba->bc", A_total, a_id
-            )  # Shape: (batch_size, num_constraints)
+            )  # (batch_size, num_constraints)
             penalty_ineq = jnp.maximum(Ax - b_total, 0.0)
             penalty = jnp.sum(penalty_ineq**2) / batch_size
 
-            # Total loss
+            # Return negative Q + penalty
             return -jnp.mean(q_values) + penalty
 
         grads = jax.grad(loss_fn)(self.policy_id_params)
@@ -243,7 +242,6 @@ class NFQCA:
         for epoch in range(num_epochs):
             # Train Q_ID and Policy_ID
             for s_id, a_id, r_id, s_da_next in batch_iter(id_data, batch_size):
-                # Convert the batch to JAX arrays for computation
                 s_id = jnp.array(s_id, dtype=jnp.float32)
                 a_id = jnp.array(a_id, dtype=jnp.float32)
                 r_id = jnp.array(r_id, dtype=jnp.float32).reshape(-1, 1)
@@ -257,7 +255,6 @@ class NFQCA:
 
             # Train Q_DA and Policy_DA
             for s_da, a_da, r_da, s_id_next in batch_iter(da_data, batch_size):
-                # Convert the batch to JAX arrays for computation
                 s_da = jnp.array(s_da, dtype=jnp.float32)
                 a_da = jnp.array(a_da, dtype=jnp.float32)
                 r_da = jnp.array(r_da, dtype=jnp.float32).reshape(-1, 1)
@@ -277,5 +274,4 @@ class NFQCA:
                 self.q_id_target_params, self.q_id_params, tau
             )
 
-            # Print progress
             print(f"Epoch {epoch+1}/{num_epochs} completed.")

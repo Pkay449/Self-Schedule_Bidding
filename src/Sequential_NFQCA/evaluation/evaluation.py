@@ -125,7 +125,7 @@ def eval_learned_policy(
 
             # Get day ahead initial state
             da_state = jnp.concatenate(
-                [jnp.array([R]), jnp.array([x0]), mu_day, P_intraday]
+                [jnp.array([R]), jnp.array([x0]), P_day, P_intraday]
             )
 
             Wt_day = P_day_0[t_i * 24 : (t_i + 1) * 24].copy()
