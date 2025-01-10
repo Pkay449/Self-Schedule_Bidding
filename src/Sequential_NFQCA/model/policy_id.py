@@ -2,8 +2,8 @@
 
 import flax.linen as nn
 import jax.numpy as jnp
-from src.config import SimulationParams
-from src.config import NEG_INF, POS_INF
+from src.config import NEG_INF, POS_INF, SimulationParams
+
 
 class PolicyID(nn.Module):
     """
@@ -19,17 +19,16 @@ class PolicyID(nn.Module):
 
     def setup(self):
         # Precompute masks as numpy boolean arrays (static)
-        self.bounded_mask_np = ((self.lb > NEG_INF) & (self.ub < POS_INF))
-        self.lower_bounded_mask_np = ((self.lb > NEG_INF) & (self.ub == POS_INF))
-        self.upper_bounded_mask_np = ((self.lb == NEG_INF) & (self.ub < POS_INF))
-        self.unbounded_mask_np = ((self.lb == NEG_INF) & (self.ub == POS_INF))
+        self.bounded_mask_np = (self.lb > NEG_INF) & (self.ub < POS_INF)
+        self.lower_bounded_mask_np = (self.lb > NEG_INF) & (self.ub == POS_INF)
+        self.upper_bounded_mask_np = (self.lb == NEG_INF) & (self.ub < POS_INF)
+        self.unbounded_mask_np = (self.lb == NEG_INF) & (self.ub == POS_INF)
 
         # Convert to JAX boolean arrays
         self.bounded_mask = jnp.array(self.bounded_mask_np, dtype=bool)
         self.lower_bounded_mask = jnp.array(self.lower_bounded_mask_np, dtype=bool)
         self.upper_bounded_mask = jnp.array(self.upper_bounded_mask_np, dtype=bool)
         self.unbounded_mask = jnp.array(self.unbounded_mask_np, dtype=bool)
-
 
     @nn.compact
     def __call__(self, state: jnp.ndarray) -> jnp.ndarray:

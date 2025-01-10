@@ -3,6 +3,7 @@
 import flax.linen as nn
 import jax.numpy as jnp
 
+
 class QNetwork(nn.Module):
     """
     A simple Q-network that takes continuous states and actions as inputs

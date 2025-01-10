@@ -2,6 +2,7 @@
 import jax.numpy as jnp
 from jax import vmap
 
+
 def build_constraints_single(
     R_val,
     x0,

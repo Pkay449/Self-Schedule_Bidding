@@ -1,7 +1,9 @@
 # src/Sequential_NFQCA/utils/data_loader.py
 
 import pickle as pkl
+
 import numpy as np
+
 
 def load_offline_data(
     path: str,
@@ -21,6 +23,7 @@ def load_offline_data(
     rewards = df["reward"].values
     next_states = np.stack(df["next_state"].values)
     return states, actions, rewards, next_states
+
 
 def batch_iter(
     data: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],

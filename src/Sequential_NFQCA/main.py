@@ -1,23 +1,32 @@
 # main.py
+from functools import partial
+
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
-from functools import partial
-from flax.training import train_state
-import flax.linen as nn
 from config import (
-    NEG_INF, POS_INF, Q_LEARNING_RATE, POLICY_LEARNING_RATE,
-    GAMMA, BATCH_SIZE, NUM_EPOCHS, TAU, DA_DATA_PATH, ID_DATA_PATH, sim_params
+    BATCH_SIZE,
+    DA_DATA_PATH,
+    GAMMA,
+    ID_DATA_PATH,
+    NUM_EPOCHS,
+    POLICY_LEARNING_RATE,
+    Q_LEARNING_RATE,
+    TAU,
+    sim_params,
 )
 from src.Sequential_NFQCA.model.policy_da import PolicyDA
 from src.Sequential_NFQCA.model.policy_id import PolicyID
 from src.Sequential_NFQCA.model.q_network import QNetwork
-from utils.data_loader import load_offline_data, batch_iter
-from utils.losses import mse_loss
-from utils.optimizers import get_optimizer, soft_update
-from utils.evaluation import eval_learned_policy, build_constraints_batch
-import matplotlib.pyplot as plt
+from src.Sequential_NFQCA.utils.constraints import build_constraints_batch
+from src.Sequential_NFQCA.utils.data_loader import batch_iter, load_offline_data
+from src.Sequential_NFQCA.utils.evaluation import (
+    eval_learned_policy,
+    plot_backtest_results,
+)
+from src.Sequential_NFQCA.utils.losses import mse_loss
+from src.Sequential_NFQCA.utils.optimizers import get_optimizer, soft_update
+
 
 class NFQCA:
     def __init__(self, sim_params):
@@ -38,14 +47,14 @@ class NFQCA:
             ub=self.sim_params.x_max_pump,
             lb=-self.sim_params.x_max_turbine,
             state_dim=842,
-            action_dim=24
+            action_dim=24,
         )
         self.policy_id_model = PolicyID(
             sim_params=self.sim_params,
             lb=jnp.array(self.sim_params.x_min_pump),  # Adjust based on actual lb_id
             ub=jnp.array(self.sim_params.x_max_pump),  # Adjust based on actual ub_id
             state_dim=890,
-            action_dim=1152
+            action_dim=1152,
         )
 
         # Dummy inputs for initialization
@@ -95,7 +104,9 @@ class NFQCA:
         Q_ID(s,a) -> r_ID + gamma * Q_DA(s', policy_DA(s'))
         """
         next_da_actions = self.policy_da_model.apply(policy_da_params, s_da_next)
-        q_da_values = self.q_da_model.apply(q_da_target_params, s_da_next, next_da_actions)
+        q_da_values = self.q_da_model.apply(
+            q_da_target_params, s_da_next, next_da_actions
+        )
         q_target_id = r_id + GAMMA * q_da_values
 
         def loss_fn(params):
@@ -125,7 +136,9 @@ class NFQCA:
         Q_DA(s,a) -> r_DA + gamma * Q_ID(s', policy_ID(s'))
         """
         next_id_actions = self.policy_id_model.apply(policy_id_params, s_id_next)
-        q_id_values = self.q_id_model.apply(q_id_target_params, s_id_next, next_id_actions)
+        q_id_values = self.q_id_model.apply(
+            q_id_target_params, s_id_next, next_id_actions
+        )
         q_target_da = r_da + GAMMA * q_id_values
 
         def loss_fn(params):
@@ -138,32 +151,42 @@ class NFQCA:
         return q_da_params_new, q_da_opt_state_new, q_da_values
 
     @partial(jax.jit, static_argnums=(0,))
-    def update_policy_da(self, policy_da_params, policy_da_opt_state, q_da_params, s_da):
+    def update_policy_da(
+        self, policy_da_params, policy_da_opt_state, q_da_params, s_da
+    ):
         """
         Update Policy_DA by maximizing Q_DA(s, policy_DA(s)).
         """
+
         def loss_fn(params):
             a_da = self.policy_da_model.apply(params, s_da)
             q_values = self.q_da_model.apply(q_da_params, s_da, a_da)
             return -jnp.mean(q_values)
 
         grads = jax.grad(loss_fn)(policy_da_params)
-        updates, policy_da_opt_state_new = self.policy_da_opt.update(grads, policy_da_opt_state)
+        updates, policy_da_opt_state_new = self.policy_da_opt.update(
+            grads, policy_da_opt_state
+        )
         policy_da_params_new = optax.apply_updates(policy_da_params, updates)
         return policy_da_params_new, policy_da_opt_state_new
 
     @partial(jax.jit, static_argnums=(0,))
-    def update_policy_id(self, policy_id_params, policy_id_opt_state, q_id_params, s_id):
+    def update_policy_id(
+        self, policy_id_params, policy_id_opt_state, q_id_params, s_id
+    ):
         """
         Update Policy_ID by maximizing Q_ID(s, policy_ID(s)).
         """
+
         def loss_fn(params):
             a_id = self.policy_id_model.apply(params, s_id)
             q_values = self.q_id_model.apply(q_id_params, s_id, a_id)
             return -jnp.mean(q_values)
 
         grads = jax.grad(loss_fn)(policy_id_params)
-        updates, policy_id_opt_state_new = self.policy_id_opt.update(grads, policy_id_opt_state)
+        updates, policy_id_opt_state_new = self.policy_id_opt.update(
+            grads, policy_id_opt_state
+        )
         policy_id_params_new = optax.apply_updates(policy_id_params, updates)
         return policy_id_params_new, policy_id_opt_state_new
 
@@ -190,6 +213,7 @@ class NFQCA:
         """
         Update Policy_ID by maximizing Q_ID(s, policy_ID(s)) with penalty for constraint violations.
         """
+
         def loss_fn(params):
             a_id = self.policy_id_model.apply(params, states_id)
             q_values = self.q_id_model.apply(q_id_params, states_id, a_id)
@@ -217,14 +241,18 @@ class NFQCA:
             # Create identity matrix with batch dimension
             I = jnp.eye(action_size)
             I = jnp.expand_dims(I, axis=0)  # Shape: (1, action_size, action_size)
-            I = jnp.tile(I, (batch_size, 1, 1))  # Shape: (batch_size, action_size, action_size)
+            I = jnp.tile(
+                I, (batch_size, 1, 1)
+            )  # Shape: (batch_size, action_size, action_size)
 
             # Concatenate all constraints
             A = jnp.concatenate([A, Aeq, -Aeq], axis=1)
             b = jnp.concatenate([b, beq + relaxation, -beq + relaxation], axis=1)
 
             # Penalty for A * x <= b
-            Ax = jnp.einsum("bkc,bc->bk", A, a_id)  # Shape: (batch_size, num_constraints)
+            Ax = jnp.einsum(
+                "bkc,bc->bk", A, a_id
+            )  # Shape: (batch_size, num_constraints)
             penalty_ineq = jnp.maximum(Ax - b, 0.0)
 
             # Aggregate penalties
@@ -234,7 +262,9 @@ class NFQCA:
             return -jnp.mean(q_values) + penalty
 
         grads = jax.grad(loss_fn)(policy_id_params)
-        updates, policy_id_opt_state_new = self.policy_id_opt.update(grads, policy_id_opt_state)
+        updates, policy_id_opt_state_new = self.policy_id_opt.update(
+            grads, policy_id_opt_state
+        )
         policy_id_params_new = optax.apply_updates(policy_id_params, updates)
         return policy_id_params_new, policy_id_opt_state_new
 
@@ -262,23 +292,25 @@ class NFQCA:
                     )
 
                 # Update Policy_ID network with penalties
-                self.policy_id_params, self.policy_id_opt_state = self.update_policy_id_with_penalty(
-                    self.policy_id_params,
-                    self.policy_id_opt_state,
-                    self.q_id_params,
-                    s_id,
-                    self.sim_params.Delta_ti,
-                    self.sim_params.beta_pump,
-                    self.sim_params.beta_turbine,
-                    self.sim_params.c_pump_up,
-                    self.sim_params.c_pump_down,
-                    self.sim_params.c_turbine_up,
-                    self.sim_params.c_turbine_down,
-                    self.sim_params.x_min_pump,
-                    self.sim_params.x_max_pump,
-                    self.sim_params.x_min_turbine,
-                    self.sim_params.x_max_turbine,
-                    self.sim_params.Rmax,
+                self.policy_id_params, self.policy_id_opt_state = (
+                    self.update_policy_id_with_penalty(
+                        self.policy_id_params,
+                        self.policy_id_opt_state,
+                        self.q_id_params,
+                        s_id,
+                        self.sim_params.Delta_ti,
+                        self.sim_params.beta_pump,
+                        self.sim_params.beta_turbine,
+                        self.sim_params.c_pump_up,
+                        self.sim_params.c_pump_down,
+                        self.sim_params.c_turbine_up,
+                        self.sim_params.c_turbine_down,
+                        self.sim_params.x_min_pump,
+                        self.sim_params.x_max_pump,
+                        self.sim_params.x_min_turbine,
+                        self.sim_params.x_max_turbine,
+                        self.sim_params.Rmax,
+                    )
                 )
 
             # Train Q_DA and Policy_DA
@@ -311,8 +343,12 @@ class NFQCA:
                 )
 
             # Perform soft updates of target networks
-            self.q_da_target_params = soft_update(self.q_da_target_params, self.q_da_params, TAU)
-            self.q_id_target_params = soft_update(self.q_id_target_params, self.q_id_params, TAU)
+            self.q_da_target_params = soft_update(
+                self.q_da_target_params, self.q_da_params, TAU
+            )
+            self.q_id_target_params = soft_update(
+                self.q_id_target_params, self.q_id_params, TAU
+            )
 
             # Print progress
             print(f"Epoch {epoch+1}/{NUM_EPOCHS} completed.")
@@ -323,9 +359,9 @@ class NFQCA:
             self.policy_da_model,
             self.policy_id_params,
             self.policy_da_params,
-            self.sim_params,
-            build_constraints_batch
+            "src/Sequential_NFQCA/objects/backtest",
         )
+
 
 if __name__ == "__main__":
     # Load data
@@ -340,3 +376,4 @@ if __name__ == "__main__":
 
     # Evaluate the learned policies
     nfqca.evaluate()
+    plot_backtest_results("src/Sequential_NFQCA/objects/backtest")
