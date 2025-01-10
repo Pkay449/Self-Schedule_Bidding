@@ -54,6 +54,16 @@ class SimulationParams:
     T : int = 100 # Optimization horizon
     
     
+@dataclass
+class TrainingParams:
+    gamma: float = 0.99  # Discount factor
+    q_learning_rate: float = 1e-4  # Learning rate for Q networks
+    policy_learning_rate: float = 1e-5  # Learning rate for Policy networks
+    batch_size: int = 256  # Size of each training batch
+    num_epochs: int = 50  # Number of training epochs
+    tau: float = 0.005  # Soft update factor for target networks
+    
+    
 # PATHS
 load_dotenv()
 pythonpath = os.getenv("PYTHONPATH")
@@ -72,10 +82,3 @@ ID_DATA_PATH = os.path.join(DATA_PATH, "offline_samples/offline_ID.pkl")
 NEG_INF = -1e8
 POS_INF = 1e8
 
-# Hyperparameters
-Q_LEARNING_RATE = 1e-4
-POLICY_LEARNING_RATE = 1e-5
-GAMMA = 0.99
-BATCH_SIZE = 256
-NUM_EPOCHS = 50
-TAU = 0.005  # Soft update parameter
