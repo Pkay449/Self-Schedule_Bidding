@@ -16,19 +16,14 @@
 
 # %%
 import os
-import pickle as pkl
 import warnings
 from dataclasses import dataclass, field
-from functools import partial
 
-import jax
 import jax.numpy as jnp
 import matlab.engine
 import matplotlib.pyplot as plt
 import numpy as np
-import optax
 import pandas as pd
-from flax import linen as nn
 from jax import vmap
 from qpsolvers import available_solvers, solve_qp
 from scipy.io import loadmat
@@ -258,7 +253,7 @@ def VRx_weights(phi, Y, weights_lsqlin):
     # Try quadprog first
     try:
         weights = solve_qp(P=H, q=c, A=A, b=b, lb=lb, ub=ub, solver="quadprog")
-    except Exception as e:
+    except Exception:
         print("quadprog failed due to positive definiteness. Trying another solver...")
 
         # Check what other solvers are available
@@ -365,8 +360,8 @@ def sample_price_intraday(Pt_day, Pt_intraday, t, Season):
         raise FileNotFoundError(f"Required data file is missing: {e.filename}")
 
     # Extract variables
-    beta_day_ahead = beta_day_ahead_data["beta_day_ahead"]
-    cov_day = cov_day_data["cov_day"]
+    beta_day_ahead_data["beta_day_ahead"]
+    cov_day_data["cov_day"]
     beta_intraday = beta_intraday_data["beta_intraday"]
     cov_intraday = cov_intraday_data["cov_intraday"]
     # We assume DoW_P0 is in DoW_data with variable name 'DoW_P0'

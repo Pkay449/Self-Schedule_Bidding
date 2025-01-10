@@ -1,16 +1,16 @@
 # main.py
 import os
-import warnings
 import pickle
+import warnings
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Dict, Tuple
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 from flax import linen as nn
-from functools import partial
 from matplotlib import pyplot as plt
 
 # Import your configuration

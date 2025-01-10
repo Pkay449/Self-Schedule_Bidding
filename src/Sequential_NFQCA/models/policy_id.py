@@ -1,12 +1,13 @@
 # src/Sequential_NFQCA/models/policy_id.py
 
-import jax.numpy as jnp
 import flax.linen as nn
+import jax.numpy as jnp
 
 from src.config import SimulationParams
 
 NEG_INF = -1e8
 POS_INF = 1e8
+
 
 class PolicyID(nn.Module):
     """

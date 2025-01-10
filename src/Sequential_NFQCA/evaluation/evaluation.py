@@ -1,21 +1,26 @@
 # src/Sequential_NFQCA/evaluation/evaluation.py
 
-import numpy as np
+import os
+
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import numpy as np
+
+from src.config import SimulationParams
 from src.Sequential_NFQCA.models.policy_da import PolicyDA
 from src.Sequential_NFQCA.models.policy_id import PolicyID
 from src.utils.helpers import sample_price_day, sample_price_intraday
-import os
-from scipy.io import loadmat
-import matplotlib.pyplot as plt
-from src.config import SimulationParams
+
 
 def eval_learned_policy(
     policy_id_model: PolicyID,
     policy_da_model: PolicyDA,
     policy_id_params,
     policy_da_params,
-    sim_params: SimulationParams
+    sim_params: SimulationParams,
+    P_day_0: np.ndarray,
+    P_intraday_0: np.ndarray,
+    save_path: str,
 ):
     """
     Evaluate the performance of the learned policies for intraday and day-ahead energy trading.
@@ -49,12 +54,12 @@ def eval_learned_policy(
 
     Q_mult = sim_params.Q_mult
     Q_fix = sim_params.Q_fix
-    Q_start_pump = sim_params.Q_start_pump
-    Q_start_turbine = sim_params.Q_start_turbine
+    sim_params.Q_start_pump
+    sim_params.Q_start_turbine
 
     c_grid_fee = sim_params.c_grid_fee
-    Delta_ti = sim_params.Delta_ti
-    Delta_td = sim_params.Delta_td
+    sim_params.Delta_ti
+    sim_params.Delta_td
 
     t_ramp_pump_up = sim_params.t_ramp_pump_up
     t_ramp_pump_down = sim_params.t_ramp_pump_down
@@ -64,11 +69,11 @@ def eval_learned_policy(
     seed = sim_params.seed
     np.random.seed(seed)
 
-    P_day_mat = loadmat(os.path.join("Data", f"P_day_ahead_test_all.mat"))
-    P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_test_all.mat"))
+    # P_day_mat = loadmat(os.path.join("Data", f"P_day_ahead_test_all.mat"))
+    # P_intraday_mat = loadmat(os.path.join("Data", f"P_intraday_test_all.mat"))
 
-    P_day_0 = P_day_mat["P_day_0"].flatten()
-    P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
+    # P_day_0 = P_day_mat["P_day_0"].flatten()
+    # P_intraday_0 = P_intraday_mat["P_intraday_0"].flatten()
 
     R_0 = 0
     x0_0 = 0
@@ -111,13 +116,17 @@ def eval_learned_policy(
             # Compute ramping costs for intraday adjustments
             q_pump_up = (jnp.abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_pump_up / 2
             q_pump_down = (jnp.abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_pump_down / 2
-            q_turbine_up = (jnp.abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_turbine_up / 2
+            q_turbine_up = (
+                (jnp.abs(mu_intraday) * Q_mult + Q_fix) * t_ramp_turbine_up / 2
+            )
             q_turbine_down = (
                 (jnp.abs(mu_intraday) / Q_mult - Q_fix) * t_ramp_turbine_down / 2
             )
 
             # Get day ahead initial state
-            da_state = jnp.concatenate([jnp.array([R]), jnp.array([x0]), mu_day, P_intraday])
+            da_state = jnp.concatenate(
+                [jnp.array([R]), jnp.array([x0]), mu_day, P_intraday]
+            )
 
             Wt_day = P_day_0[t_i * 24 : (t_i + 1) * 24].copy()
             day_path = np.tile(Wt_day, (4, 1))
@@ -201,44 +210,30 @@ def eval_learned_policy(
     EV = np.mean(V)
     print(EV)
 
-    # Print backtest statistics
+    # print backtest statistics :
     print("Backtest Statistics:")
     print("Mean Value: ", np.mean(V))
     print("Standard Deviation: ", np.std(V))
     print("Total Reward: ", np.sum(V))
 
-    # Save trackers
-    np.save("Results/NFQCA/BACKTEST_storage_track.npy", storage_track)
+    # save trackers
+    # storage_track
+    np.save(os.path.join(save_path, "BACKTEST_storage_track.npy"), storage_track)
 
     # Save paths
-    np.save("Results/NFQCA/BACKTEST_R_path.npy", R_path)
-    np.save("Results/NFQCA/BACKTEST_x_intraday_path.npy", x_intraday_path)
-    np.save("Results/NFQCA/BACKTEST_P_day_path.npy", P_day_path)
-    np.save("Results/NFQCA/BACKTEST_P_intraday_path.npy", P_intraday_path)
-    np.save("Results/NFQCA/BACKTEST_x_pump_path.npy", x_pump_path)
-    np.save("Results/NFQCA/BACKTEST_x_turbine_path.npy", x_turbine_path)
-    np.save("Results/NFQCA/BACKTEST_y_pump_path.npy", y_pump_path)
-    np.save("Results/NFQCA/BACKTEST_y_turbine_path.npy", y_turbine_path)
-    np.save("Results/NFQCA/BACKTEST_z_pump_path.npy", z_pump_path)
-    np.save("Results/NFQCA/BACKTEST_z_turbine_path.npy", z_turbine_path)
-
-    # Visualization
-    R_path = np.load("Results/NFQCA/BACKTEST_R_path.npy").ravel()
-    x_intraday_path = np.load("Results/NFQCA/BACKTEST_x_intraday_path.npy").ravel()
-    P_day_path = np.load("Results/NFQCA/BACKTEST_P_day_path.npy").ravel()
-    P_intraday_path = np.load("Results/NFQCA/BACKTEST_P_intraday_path.npy").ravel()
-    x_pump_path = np.load("Results/NFQCA/BACKTEST_x_pump_path.npy").ravel()
-    x_turbine_path = np.load("Results/NFQCA/BACKTEST_x_turbine_path.npy").ravel()
-    y_pump_path = np.load("Results/NFQCA/BACKTEST_y_pump_path.npy").ravel()
-    y_turbine_path = np.load("Results/NFQCA/BACKTEST_y_turbine_path.npy").ravel()
-    z_pump_path = np.load("Results/NFQCA/BACKTEST_z_pump_path.npy").ravel()
-
-    # Create a figure with multiple subplots
-    fig, axs = plt.subplots(3, 3, figsize=(15, 10))
-    fig.suptitle("Backtest Data Plots", fontsize=16)
+    np.save(os.path.join(save_path, "BACKTEST_R_path.npy"), R_path)
+    np.save(os.path.join(save_path, "BACKTEST_x_intraday_path.npy"), x_intraday_path)
+    np.save(os.path.join(save_path, "BACKTEST_P_day_path.npy"), P_day_path)
+    np.save(os.path.join(save_path, "BACKTEST_P_intraday_path.npy"), P_intraday_path)
+    np.save(os.path.join(save_path, "BACKTEST_x_pump_path.npy"), x_pump_path)
+    np.save(os.path.join(save_path, "BACKTEST_x_turbine_path.npy"), x_turbine_path)
+    np.save(os.path.join(save_path, "BACKTEST_y_pump_path.npy"), y_pump_path)
+    np.save(os.path.join(save_path, "BACKTEST_y_turbine_path.npy"), y_turbine_path)
+    np.save(os.path.join(save_path, "BACKTEST_z_pump_path.npy"), z_pump_path)
+    np.save(os.path.join(save_path, "BACKTEST_z_turbine_path.npy"), z_turbine_path)
 
     # Plot each array in a subplot
-    data = {
+    backtest_data = {
         "R Path": R_path,
         "x Intraday Path": x_intraday_path,
         "P Day Path": P_day_path,
@@ -250,9 +245,32 @@ def eval_learned_policy(
         "z Pump Path": z_pump_path,
     }
 
+    # Validate data
+    for key, array in backtest_data.items():
+        if array.size == 0:
+            print(f"Warning: '{key}' contains no data.")
+
+    # Plot and save results
+    plot_results(backtest_data, save_path)
+
+    return EV
+
+
+def plot_results(data, save_dir):
+    """Plots and saves results"""
+    # Ensure the save directory exists
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Create a figure with multiple subplots
+    fig, axs = plt.subplots(3, 3, figsize=(15, 10))
+    fig.suptitle("Backtest Data Plots", fontsize=16)
+
     # Iterate through data and subplots
     for ax, (title, array) in zip(axs.flat, data.items()):
-        ax.plot(array)
+        if array.size == 0:
+            ax.text(0.5, 0.5, "No Data", ha="center", va="center", fontsize=12)
+        else:
+            ax.plot(array.flatten())  # Flatten to ensure 1D plotting
         ax.set_title(title)
         ax.set_xlabel("Time Steps")
         ax.set_ylabel("Values")
@@ -260,4 +278,9 @@ def eval_learned_policy(
 
     # Adjust layout
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.savefig("Results/backtest_plots.png")
+
+    # Save the figure in the provided directory
+    save_path = os.path.join(save_dir, "backtest_plots.png")
+    plt.savefig(save_path)
+    plt.close(fig)  # Close the figure to avoid resource leaks
+    print(f"Plots saved at: {save_path}")

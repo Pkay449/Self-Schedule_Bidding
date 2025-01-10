@@ -1,10 +1,11 @@
 # src/config.py
 
-from dataclasses import dataclass, field
 import os
-from dotenv import load_dotenv
+from dataclasses import dataclass, field
+
 import numpy as np
-import jax.numpy as jnp
+from dotenv import load_dotenv
+
 
 @dataclass
 class SimulationParams:
@@ -48,12 +49,12 @@ class SimulationParams:
     c_pump_down: float = 2 / 60 / 2
     c_turbine_up: float = 2 / 60 / 2
     c_turbine_down: float = 2 / 60 / 2
-    
-    N : int = 50 # Number of scenarios
-    M : int = 10 # Number of iterations
-    T : int = 100 # Optimization horizon
-    
-    
+
+    N: int = 50  # Number of scenarios
+    M: int = 10  # Number of iterations
+    T: int = 100  # Optimization horizon
+
+
 @dataclass
 class TrainingParams:
     gamma: float = 0.99  # Discount factor
@@ -62,8 +63,10 @@ class TrainingParams:
     batch_size: int = 256  # Size of each training batch
     num_epochs: int = 50  # Number of training epochs
     tau: float = 0.005  # Soft update factor for target networks
-    
-    
+    POS_INF: float = 1e8  # Positive infinity
+    NEG_INF: float = -1e8
+
+
 # PATHS
 load_dotenv()
 pythonpath = os.getenv("PYTHONPATH")
@@ -75,10 +78,3 @@ ROOT_PATH = os.path.abspath(pythonpath)
 DATA_PATH = os.path.join(ROOT_PATH, "data")
 DA_DATA_PATH = os.path.join(DATA_PATH, "offline_samples/offline_DA.pkl")
 ID_DATA_PATH = os.path.join(DATA_PATH, "offline_samples/offline_ID.pkl")
-
-
-# NFQCA
-# Constants
-NEG_INF = -1e8
-POS_INF = 1e8
-

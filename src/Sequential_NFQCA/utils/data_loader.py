@@ -2,6 +2,7 @@
 
 import numpy as np
 
+
 def batch_iter(
     data: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     batch_size: int,

@@ -1,7 +1,8 @@
 # src/Sequential_NFQCA/models/q_network.py
 
-import jax.numpy as jnp
 import flax.linen as nn
+import jax.numpy as jnp
+
 
 class QNetwork(nn.Module):
     """

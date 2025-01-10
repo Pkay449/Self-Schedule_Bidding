@@ -3,6 +3,7 @@
 import flax.linen as nn
 import jax.numpy as jnp
 
+
 class PolicyDA(nn.Module):
     """
     Policy network for the Day-Ahead scenario with bounded continuous actions.

@@ -7,24 +7,20 @@ This module contains functions for computing weights, sampling prices,
 generating scenarios, and building constraints for optimization problems.
 """
 
-import pickle as pkl
 
+import os
 import warnings
 
+import jax.numpy as jnp
 import matlab.engine
 import numpy as np
-import jax
 from jax import vmap
-import jax.numpy as jnp
-import optax
 from qpsolvers import available_solvers, solve_qp
 from scipy.io import loadmat
 from scipy.optimize import minimize_scalar
 from scipy.stats import multivariate_normal
 
-from src.config import ROOT_PATH, DATA_PATH
-
-import os
+from src.config import DATA_PATH
 
 warnings.filterwarnings("ignore")
 
@@ -56,7 +52,7 @@ def badp_weights(T=5, data_dir="BADAP_w_data"):
 
     # Load data
     # Adjust file paths and variable keys according to your environment and data files
-    
+
     full_data_dir = os.path.join(DATA_PATH, data_dir)
     beta_da_path = os.path.join(full_data_dir, f"beta_day_ahead_{Season}.mat")
     beta_id_path = os.path.join(full_data_dir, f"beta_intraday_{Season}.mat")
