@@ -1,10 +1,10 @@
-# main.py
+# src/Sequential_NFQCA/main.py
 from functools import partial
 
 import jax
 import jax.numpy as jnp
 import optax
-from config import (
+from src.config import (
     BATCH_SIZE,
     DA_DATA_PATH,
     GAMMA,
@@ -13,7 +13,7 @@ from config import (
     POLICY_LEARNING_RATE,
     Q_LEARNING_RATE,
     TAU,
-    sim_params,
+    SimulationParams,
 )
 from src.Sequential_NFQCA.model.policy_da import PolicyDA
 from src.Sequential_NFQCA.model.policy_id import PolicyID
@@ -29,8 +29,8 @@ from src.Sequential_NFQCA.utils.optimizers import get_optimizer, soft_update
 
 
 class NFQCA:
-    def __init__(self, sim_params):
-        self.sim_params = sim_params
+    def __init__(self):
+        self.sim_params = SimulationParams()
         self.initialize_models()
         self.initialize_optimizers()
 
@@ -369,7 +369,7 @@ if __name__ == "__main__":
     id_data = load_offline_data(ID_DATA_PATH)
 
     # Initialize NFQCA model
-    nfqca = NFQCA(sim_params)
+    nfqca = NFQCA()
 
     # Train the model
     nfqca.train(da_data, id_data)

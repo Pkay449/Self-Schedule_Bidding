@@ -63,8 +63,8 @@ ROOT_PATH = os.path.abspath(pythonpath)
 
 # Data directory (root/data)
 DATA_PATH = os.path.join(ROOT_PATH, "data")
-DA_DATA_PATH = os.path.join(DATA_PATH, "offline_samples\offline_DA.pkl")
-ID_DATA_PATH = os.path.join(DATA_PATH, "offline_samples\offline_ID.pkl")
+DA_DATA_PATH = os.path.join(DATA_PATH, "offline_samples/offline_DA.pkl")
+ID_DATA_PATH = os.path.join(DATA_PATH, "offline_samples/offline_ID.pkl")
 
 
 # NFQCA

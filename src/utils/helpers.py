@@ -1,4 +1,4 @@
-# src/helpers.py
+# src/utils/helpers.py
 
 """
 Helper functions for the Self-Scheduled Bidding project.

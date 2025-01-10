@@ -1,3 +1,445 @@
+import os
+import pickle as pkl
+import warnings
+from dataclasses import dataclass, field
+from functools import partial
+
+import jax
+import jax.numpy as jnp
+import matlab.engine
+import matplotlib.pyplot as plt
+import numpy as np
+import optax
+import pandas as pd
+from flax import linen as nn
+from jax import vmap
+from qpsolvers import available_solvers, solve_qp
+from scipy.io import loadmat
+from scipy.optimize import minimize_scalar
+from scipy.spatial import ConvexHull
+from scipy.stats import multivariate_normal
+from tqdm import tqdm
+
+warnings.filterwarnings("ignore")
+
+@dataclass
+class SimulationParams:
+    Season: str = "Summer"
+    length_R: int = 5
+    seed: int = 2
+    D: int = 7  # days in forecast
+    Rmax: float = 100.0
+
+    # Ramp times (in hours)
+    t_ramp_pump_up: float = 2 / 60
+    t_ramp_pump_down: float = 2 / 60
+    t_ramp_turbine_up: float = 2 / 60
+    t_ramp_turbine_down: float = 2 / 60
+
+    # Grid fees and time deltas
+    c_grid_fee: float = 5 / 4
+    Delta_ti: float = 0.25
+    Delta_td: float = 1.0
+
+    # Q-learning parameters
+    Q_mult: float = 1.2
+    Q_fix: float = 3
+    Q_start_pump: float = 15
+    Q_start_turbine: float = 15
+
+    # Pump and turbine parameters
+    beta_pump: float = 0.9
+    beta_turbine: float = 0.9
+
+    x_max_pump: float = 10.0
+    x_min_pump: float = 5.0
+    x_max_turbine: float = 10.0
+    x_min_turbine: float = 5.0
+
+    # Derived parameters
+    R_vec: np.ndarray = field(default_factory=lambda: np.linspace(0, 100.0, 5))
+    x_vec: np.ndarray = field(default_factory=lambda: np.array([-10, 0, 10]))
+
+    c_pump_up: float = 2 / 60 / 2
+    c_pump_down: float = 2 / 60 / 2
+    c_turbine_up: float = 2 / 60 / 2
+    c_turbine_down: float = 2 / 60 / 2
+    
+def sample_price_day(Pt_day, t, Season):
+    """
+    Compute the expected values (mu_P) and covariance matrix (cov_P)
+    of day-ahead prices given current observed prices and the current stage.
+
+    Parameters
+    ----------
+    Pt_day : np.ndarray
+        Current observed day-ahead prices as a 1D array (row vector).
+    t : int
+        Current time stage (1-based index as in MATLAB).
+    Season : str
+        The season name (e.g., 'Summer').
+
+    Returns
+    -------
+    mu_P : np.ndarray
+        The expected values of day-ahead prices as a 1D array.
+    cov_P : np.ndarray
+        The covariance matrix of day-ahead prices.
+    """
+    try:
+        # Load required data
+        beta_day_ahead_data = loadmat(f"Data/beta_day_ahead_{Season}.mat")
+        cov_day_data = loadmat(f"Data/cov_day_{Season}.mat")
+        DoW_data = loadmat(f"Data/DoW_{Season}.mat")
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Required data file is missing: {e.filename}")
+
+    # Extract variables from loaded data
+    beta_day_ahead = beta_day_ahead_data["beta_day_ahead"]  # Shape depends on data
+    cov_day = cov_day_data["cov_day"]  # Covariance matrix
+    # We assume DoW_P0 is stored in DoW_data. The MATLAB code uses DoW_P0 and DoW.
+    # Typically, "load(strcat('Data\DoW_',Season,'.mat'))" would load something like DoW_P0.
+    # Check the .mat file for the exact variable name.
+    # We'll assume it contains a variable DoW_P0. If it's different, rename accordingly.
+    DoW_P0 = DoW_data["DoW_P0"].item()  # Assuming it's stored as a scalar
+
+    # Construct day-of-week vector
+    DOW = np.zeros(7)
+    # MATLAB: DOW(1+mod(t+DoW_P0-1,7))=1;
+    # Python is zero-based, but the logic is the same. Just compute the index.
+    dow_index = int((t + DoW_P0 - 1) % 7)
+    DOW[dow_index] = 1
+
+    # Q = [1, DOW, Pt_day]
+    Q = np.concatenate(([1], DOW, Pt_day))
+
+    # In Python: Q (1D array) and beta_day_ahead (2D array)
+    # Need to ensure dimensions align. Q.shape: (1+7+(24*D),) and beta_day_ahead: let's assume it matches dimensions.
+    mu_P = Q @ beta_day_ahead.T  # Result: 1D array of mu values
+
+    # cov_P is just read from the file
+    cov_P = cov_day
+
+    return mu_P, cov_P
+
+def sample_price_intraday(Pt_day, Pt_intraday, t, Season):
+    """
+    Compute the expected values (mu_P) and covariance matrix (cov_P) of intraday prices
+    given current observed day-ahead and intraday prices and the current stage.
+
+    Parameters
+    ----------
+    Pt_day : np.ndarray
+        Current observed day-ahead prices as a 1D array (row vector).
+    Pt_intraday : np.ndarray
+        Current observed intraday prices as a 1D array (row vector).
+    t : int
+        Current time stage (1-based index as in MATLAB).
+    Season : str
+        The season name (e.g., 'Summer').
+
+    Returns
+    -------
+    mu_P : np.ndarray
+        The expected values of intraday prices as a 1D array.
+    cov_P : np.ndarray
+        The covariance matrix of intraday prices.
+    """
+
+    # Load required data
+    try:
+        beta_day_ahead_data = loadmat(f"Data/beta_day_ahead_{Season}.mat")
+        cov_day_data = loadmat(f"Data/cov_day_{Season}.mat")
+        beta_intraday_data = loadmat(f"Data/beta_intraday_{Season}.mat")
+        cov_intraday_data = loadmat(f"Data/cov_intraday_{Season}.mat")
+        DoW_data = loadmat(f"Data/DoW_{Season}.mat")
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Required data file is missing: {e.filename}")
+
+    # Extract variables
+    beta_day_ahead = beta_day_ahead_data["beta_day_ahead"]
+    cov_day = cov_day_data["cov_day"]
+    beta_intraday = beta_intraday_data["beta_intraday"]
+    cov_intraday = cov_intraday_data["cov_intraday"]
+    # We assume DoW_P0 is in DoW_data with variable name 'DoW_P0'
+    DoW_P0 = DoW_data["DoW_P0"].item()
+
+    # Construct DOW vector
+    DOW = np.zeros(7)
+    dow_index = int((t + DoW_P0 - 1) % 7)
+    DOW[dow_index] = 1
+
+    # Q = [1, DOW, Pt_intraday, Pt_day]
+    Q = np.concatenate(([1], DOW, Pt_intraday, Pt_day))
+
+    # mu_P = Q * beta_intraday'
+    mu_P = Q @ beta_intraday.T
+
+    # cov_P = cov_intraday
+    cov_P = cov_intraday
+
+    return mu_P, cov_P
+
+def build_constraints_single(
+    R_val, x0,
+    Delta_ti, beta_pump, beta_turbine,
+    c_pump_up, c_pump_down,
+    c_turbine_up, c_turbine_down,
+    x_min_pump, x_max_pump,
+    x_min_turbine, x_max_turbine,
+    Rmax
+):
+    """
+    Build constraints for a single-step optimization problem involving reservoir state.
+
+    This function uses JAX arrays (jnp) for demonstration, but the structure is similar
+    to NumPy-based approaches.
+
+    Parameters
+    ----------
+    R_val : float
+        Some reference or initial reservoir value.
+    x0 : float
+        Initial water volume or state variable.
+    Delta_ti : float
+        Time increment or resolution.
+    beta_pump : float
+        Pump efficiency factor.
+    beta_turbine : float
+        Turbine efficiency factor.
+    c_pump_up : float
+        Pump cost factor (up).
+    c_pump_down : float
+        Pump cost factor (down).
+    c_turbine_up : float
+        Turbine cost factor (up).
+    c_turbine_down : float
+        Turbine cost factor (down).
+    x_min_pump : float
+        Minimum pumping rate.
+    x_max_pump : float
+        Maximum pumping rate.
+    x_min_turbine : float
+        Minimum turbine outflow rate.
+    x_max_turbine : float
+        Maximum turbine outflow rate.
+    Rmax : float
+        Maximum reservoir capacity.
+
+    Returns
+    -------
+    A : jnp.ndarray
+        Combined inequality constraint matrix for a single step.
+    b : jnp.ndarray
+        Combined inequality constraint vector for a single step.
+    Aeq : jnp.ndarray
+        Combined equality constraint matrix for a single step.
+    beq : jnp.ndarray
+        Combined equality constraint vector for a single step.
+    lb : jnp.ndarray
+        Variable lower bounds.
+    ub : jnp.ndarray
+        Variable upper bounds.
+    """
+    # A1
+    A1 = jnp.hstack([
+        -jnp.eye(96) + jnp.diag(jnp.ones(95), -1),
+        jnp.zeros((96, 96)),
+        Delta_ti * beta_pump * jnp.eye(96),
+        -Delta_ti / beta_turbine * jnp.eye(96),
+        -beta_pump * c_pump_up * jnp.eye(96),
+        beta_pump * c_pump_down * jnp.eye(96),
+        c_turbine_up / beta_turbine * jnp.eye(96),
+        -c_turbine_down / beta_turbine * jnp.eye(96),
+        jnp.zeros((96, 96 * 4)),
+    ])
+    b1 = jnp.zeros(96).at[0].set(-R_val)
+
+    # A2
+    Axh = jnp.zeros((96, 24))
+    for h in range(24):
+        Axh = Axh.at[4 * h:4 * (h + 1), h].set(-1)
+
+    A2 = jnp.hstack([
+        jnp.zeros((96, 96)),
+        -jnp.eye(96),
+        jnp.eye(96),
+        -jnp.eye(96),
+        jnp.zeros((96, 96 * 8)),
+    ])
+    b2 = jnp.zeros(96)
+
+    # A3
+    A3 = jnp.hstack([
+        jnp.zeros((96, 96 * 2)),
+        jnp.eye(96) - jnp.diag(jnp.ones(95), -1),
+        jnp.zeros((96, 96)),
+        -jnp.eye(96),
+        jnp.eye(96),
+        jnp.zeros((96, 96 * 6)),
+    ])
+    b3 = jnp.zeros(96).at[0].set(jnp.maximum(x0, 0))
+
+    # A4
+    A4 = jnp.hstack([
+        jnp.zeros((96, 96 * 3)),
+        jnp.eye(96) - jnp.diag(jnp.ones(95), -1),
+        jnp.zeros((96, 96 * 2)),
+        -jnp.eye(96),
+        jnp.eye(96),
+        jnp.zeros((96, 96 * 4)),
+    ])
+    b4 = jnp.zeros(96).at[0].set(jnp.maximum(-x0, 0))
+
+    Aeq = jnp.vstack([A1, A2, A3, A4])
+    beq = jnp.hstack([b1, b2, b3, b4])
+
+    # Constraints for pump and turbine power limits
+    A1_pump_turbine = jnp.vstack([
+        jnp.hstack([
+            jnp.zeros((96, 96 * 2)),
+            -jnp.eye(96),
+            jnp.zeros((96, 96 * 5)),
+            x_min_pump * jnp.eye(96),
+            jnp.zeros((96, 96 * 3)),
+        ]),
+        jnp.hstack([
+            jnp.zeros((96, 96 * 2)),
+            jnp.eye(96),
+            jnp.zeros((96, 96 * 5)),
+            -x_max_pump * jnp.eye(96),
+            jnp.zeros((96, 96 * 3)),
+        ]),
+        jnp.hstack([
+            jnp.zeros((96, 96 * 3)),
+            -jnp.eye(96),
+            jnp.zeros((96, 96 * 5)),
+            x_min_turbine * jnp.eye(96),
+            jnp.zeros((96, 96 * 2)),
+        ]),
+        jnp.hstack([
+            jnp.zeros((96, 96 * 3)),
+            jnp.eye(96),
+            jnp.zeros((96, 96 * 5)),
+            -x_max_turbine * jnp.eye(96),
+            jnp.zeros((96, 96 * 2)),
+        ]),
+    ])
+    b1_pump_turbine = jnp.zeros(96 * 4)
+
+    # Additional constraints if needed:
+    A2_additional = jnp.hstack([
+        jnp.zeros((96, 96 * 8)),
+        jnp.eye(96) - jnp.diag(jnp.ones(95), -1),
+        jnp.zeros((96, 96)),
+        -jnp.eye(96),
+        jnp.zeros((96, 96)),
+    ])
+    b2_additional = jnp.zeros(96).at[0].set((x0 > 0).astype(jnp.float32))
+
+    A3_additional = jnp.hstack([
+        jnp.zeros((96, 96 * 9)),
+        jnp.eye(96) - jnp.diag(jnp.ones(95), -1),
+        jnp.zeros((96, 96)),
+        -jnp.eye(96),
+    ])
+    b3_additional = jnp.zeros(96).at[0].set((x0 < 0).astype(jnp.float32))
+
+    A4_additional = jnp.hstack([
+        jnp.zeros((96, 96 * 8)),
+        jnp.eye(96),
+        jnp.eye(96),
+        jnp.zeros((96, 2 * 96)),
+    ])
+    b4_additional = jnp.ones(96)
+
+    A = jnp.vstack([A1_pump_turbine, A2_additional, A3_additional, A4_additional])
+    b = jnp.concatenate([b1_pump_turbine, b2_additional, b3_additional, b4_additional])
+
+    # lb and ub
+    lb = jnp.concatenate([
+        jnp.zeros(96),
+        -jnp.inf * jnp.ones(96),
+        jnp.zeros(96 * 10),
+    ])
+
+    ub = jnp.concatenate([
+        Rmax * jnp.ones(96),
+        jnp.inf * jnp.ones(96 * 7),
+        jnp.ones(96 * 4),
+    ])
+
+    return (
+        A.astype(jnp.float32),
+        b.astype(jnp.float32),
+        Aeq.astype(jnp.float32),
+        beq.astype(jnp.float32),
+        lb.astype(jnp.float32),
+        ub.astype(jnp.float32)
+    )
+
+
+def build_constraints_batch(
+    states,
+    Delta_ti, beta_pump, beta_turbine,
+    c_pump_up, c_pump_down,
+    c_turbine_up, c_turbine_down,
+    x_min_pump, x_max_pump,
+    x_min_turbine, x_max_turbine,
+    Rmax
+):
+    """
+    Vectorized building of constraints for multiple states in a batch.
+
+    Parameters
+    ----------
+    states : ndarray
+        A 2D array where each row represents a state [R_val, x0].
+    Delta_ti : float
+        Time increment or resolution.
+    beta_pump : float
+        Pump efficiency factor.
+    beta_turbine : float
+        Turbine efficiency factor.
+    c_pump_up : float
+        Pump cost factor (up).
+    c_pump_down : float
+        Pump cost factor (down).
+    c_turbine_up : float
+        Turbine cost factor (up).
+    c_turbine_down : float
+        Turbine cost factor (down).
+    x_min_pump : float
+        Minimum pumping rate.
+    x_max_pump : float
+        Maximum pumping rate.
+    x_min_turbine : float
+        Minimum turbine outflow rate.
+    x_max_turbine : float
+        Maximum turbine outflow rate.
+    Rmax : float
+        Maximum reservoir capacity.
+
+    Returns
+    -------
+    tuple
+        A, b, Aeq, beq, lb, ub for each state in states, each of shape (batch_size, ...).
+    """
+    R_val = states[:, 0]  # shape: (batch_size,)
+    x0 = states[:, 1]     # shape: (batch_size,)
+
+    # Vectorize the single constraint builder
+    A, b, Aeq, beq, lb, ub = vmap(
+        build_constraints_single,
+        in_axes=(0, 0, None, None, None, None, None, None, None, None, None, None, None, None)
+    )(R_val, x0, Delta_ti, beta_pump, beta_turbine,
+       c_pump_up, c_pump_down, c_turbine_up, c_turbine_down,
+       x_min_pump, x_max_pump, x_min_turbine, x_max_turbine,
+       Rmax)
+
+    return A, b, Aeq, beq, lb, ub  # Each has shape (batch_size, ...)
+
+
 # %% [markdown]
 # # Our Approach - NFQCA
 #
@@ -47,6 +489,7 @@
 NEG_INF = -1e8
 POS_INF = 1e8
 
+sim_params = SimulationParams()
 
 # Network Definitions
 class QNetwork(nn.Module):
