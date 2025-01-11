@@ -52,7 +52,7 @@ class SimulationParams:
 
     N: int = 50  # Number of scenarios
     M: int = 10  # Number of iterations
-    T: int = 100  # Optimization horizon
+    T: int = 30  # Optimization horizon
 
 
 @dataclass
