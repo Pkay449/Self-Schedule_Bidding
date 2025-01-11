@@ -223,7 +223,7 @@ class NFQCA:
                 "bca,ba->bc", A_total, a_id
             )  # (batch_size, num_constraints)
             penalty_ineq = jnp.maximum(Ax - b_total, 0.0)
-            penalty = jnp.sum(penalty_ineq**2) / batch_size
+            penalty = jnp.sum(penalty_ineq**2) # / batch_size
 
             # Return negative Q + penalty
             return -jnp.mean(q_values) + penalty
