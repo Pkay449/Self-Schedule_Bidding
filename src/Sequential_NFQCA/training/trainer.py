@@ -223,7 +223,7 @@ class NFQCA:
                 "bca,ba->bc", A_total, a_id
             )  # (batch_size, num_constraints)
             penalty_ineq = jnp.maximum(Ax - b_total, 0.0)
-            penalty = jnp.sum(penalty_ineq**2) # / batch_size
+            penalty = jnp.sum(penalty_ineq**2) / batch_size
 
             # Return negative Q + penalty
             return -jnp.mean(q_values) + penalty
@@ -248,7 +248,8 @@ class NFQCA:
                 s_da_next = jnp.array(s_da_next, dtype=jnp.float32)
 
                 # Update Q_ID network
-                self.update_q_id(s_id, a_id, r_id, s_da_next)
+                for _ in range(5):
+                    self.update_q_id(s_id, a_id, r_id, s_da_next)
 
                 # Update Policy_ID network with penalties
                 self.update_policy_id_with_penalty(s_id)
@@ -261,7 +262,8 @@ class NFQCA:
                 s_id_next = jnp.array(s_id_next, dtype=jnp.float32)
 
                 # Update Q_DA network
-                self.update_q_da(s_da, a_da, r_da, s_id_next)
+                for _ in range(5):
+                    self.update_q_da(s_da, a_da, r_da, s_id_next)
 
                 # Update Policy_DA network
                 self.update_policy_da(s_da)
