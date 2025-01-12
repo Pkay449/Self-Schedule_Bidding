@@ -1,2 +1,4 @@
 .env
 *.pyc
+/src/BADP_w
+src/Sequential_NFQCA/all.py
