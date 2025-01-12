@@ -166,9 +166,9 @@ pip install numpy pandas jax flax optax matplotlib scipy tqdm
 
 ## References & Further Reading
 
-- **Finnah et al.** on Approximate Dynamic Programming for day-ahead and intraday bidding.  
+- **Finnah et al.(2022)** on Approximate Dynamic Programming for day-ahead and intraday bidding.  
 - **Powell, W. B. (2019)**: A comprehensive reference on Approximate Dynamic Programming.  
 - **Ziel, F.** and **Weron, R.**: Price forecasting approaches for day-ahead and intraday electricity markets.  
-- **Glasserman, P.** (2003): Monte Carlo Methods in Financial Engineering (for scenario-based backward pass ideas).  
+- **Glasserman, P. (2003)** : Monte Carlo Methods in Financial Engineering (for scenario-based backward pass ideas).  
 
 For questions or contributions, feel free to open an issue or pull request!
