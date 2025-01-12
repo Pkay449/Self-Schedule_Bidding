@@ -1,4 +1,4 @@
-# src/Sequential_NFQCA/main.py
+# src/Sequential_NFQCA/nfqca_main.py
 
 import os
 import sys
@@ -26,7 +26,7 @@ from src.Sequential_NFQCA.evaluation.evaluation import eval_learned_policy
 from src.Sequential_NFQCA.training.trainer import NFQCA
 
 
-def main():
+def nfqca_main():
     # Suppress warnings
     warnings.filterwarnings("ignore")
 
@@ -65,4 +65,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    nfqca_main()
