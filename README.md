@@ -92,14 +92,6 @@ conda activate energy-bidding
 pip install numpy pandas jax flax optax matplotlib scipy tqdm
 ```
 
-4. **Environment Setup**:
-   - If your code uses `.env`, ensure that `PYTHONPATH` is set to include `src/`.  
-   - Example of `.env`:
-     ```
-     PYTHONPATH=./src
-     ```
-   - Then `main.py` should be able to import `src.BADP.badp_main` and `src.Sequential_NFQCA.nfqca_main`.
-
 ---
 
 ## Quick Start
